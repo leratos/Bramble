@@ -9,6 +9,7 @@ import pytest
 
 from bramble.journal_db import JournalDB
 from bramble.journal_entry import JournalEntry, JournalStatus
+from bramble.project_summary import ProjectSummary
 
 
 def _entry(
@@ -210,6 +211,74 @@ class TestListProjects:
 
     def test_empty_db(self, db: JournalDB) -> None:
         assert db.list_projects() == []
+
+
+# ---------------------------------------------------------------------------
+# project_overview()
+# ---------------------------------------------------------------------------
+class TestProjectOverview:
+    def test_empty_db_returns_empty_list(self, db: JournalDB) -> None:
+        assert db.project_overview() == []
+
+    def test_counts_and_last_timestamp_per_project(self, db: JournalDB) -> None:
+        base = datetime(2026, 5, 12, 8, 0, tzinfo=UTC)
+        db.append(_entry(project="bramble", content="b1", timestamp=base))
+        db.append(
+            _entry(
+                project="bramble",
+                content="b2",
+                timestamp=base + timedelta(minutes=5),
+            )
+        )
+        db.append(
+            _entry(
+                project="elder-berry",
+                content="e1",
+                timestamp=base + timedelta(minutes=10),
+            )
+        )
+
+        overview = {s.name: s for s in db.project_overview()}
+        assert overview["bramble"].entry_count == 2
+        assert overview["bramble"].last_timestamp == base + timedelta(minutes=5)
+        assert overview["elder-berry"].entry_count == 1
+        assert overview["elder-berry"].last_timestamp == base + timedelta(minutes=10)
+
+    def test_sorted_by_last_timestamp_desc(self, db: JournalDB) -> None:
+        base = datetime(2026, 5, 12, 8, 0, tzinfo=UTC)
+        db.append(_entry(project="oldest", content="o", timestamp=base))
+        db.append(
+            _entry(
+                project="middle",
+                content="m",
+                timestamp=base + timedelta(hours=1),
+            )
+        )
+        db.append(
+            _entry(
+                project="newest",
+                content="n",
+                timestamp=base + timedelta(hours=2),
+            )
+        )
+        names = [s.name for s in db.project_overview()]
+        assert names == ["newest", "middle", "oldest"]
+
+    def test_ties_broken_alphabetically(self, db: JournalDB) -> None:
+        same_ts = datetime(2026, 5, 12, 8, 0, tzinfo=UTC)
+        db.append(_entry(project="charlie", content="c", timestamp=same_ts))
+        db.append(_entry(project="alpha", content="a", timestamp=same_ts))
+        db.append(_entry(project="bravo", content="b", timestamp=same_ts))
+        names = [s.name for s in db.project_overview()]
+        assert names == ["alpha", "bravo", "charlie"]
+
+    def test_timestamps_are_utc_datetimes(self, db: JournalDB) -> None:
+        ts = datetime(2026, 5, 12, 8, 0, tzinfo=UTC)
+        db.append(_entry(project="bramble", content="x", timestamp=ts))
+        [summary] = db.project_overview()
+        assert isinstance(summary, ProjectSummary)
+        assert summary.last_timestamp.tzinfo is not None
+        assert summary.last_timestamp.utcoffset() == timedelta(0)
 
 
 # ---------------------------------------------------------------------------

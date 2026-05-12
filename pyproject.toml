@@ -17,14 +17,21 @@ classifiers = [
     "Private :: Do Not Upload",
 ]
 
-# Phase 1 hat noch keine Runtime-Deps. FastMCP kommt erst in Phase 2.
-dependencies = []
+# Runtime-Deps. FastMCP-Range gemäss Entscheidung A im Phase-2-Konzept,
+# python-json-logger gemäss Entscheidung I (JSON-Logs ab Phase 2).
+dependencies = [
+    "fastmcp>=3,<4",
+    "python-json-logger>=4,<5",
+]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
 ]
+
+[project.scripts]
+bramble-server = "bramble.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

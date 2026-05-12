@@ -1,7 +1,8 @@
-# Phase 2 – FastMCP-Server (Konzept)
+# Phase 2 – FastMCP-Server
 
-Status: **Konzept, nicht freigegeben.** Vor Phase-2-Beginn die offenen
-Designfragen (Abschnitt 2) durchgehen und entscheiden.
+Status: **Entschieden, in Umsetzung.** Designfragen aus dem Konzept
+sind abgehakt; siehe Abschnitt 2 für die getroffenen Entscheidungen
+und Abweichungen vom ursprünglichen Vorschlag.
 
 ## 1. Ziel von Phase 2
 
@@ -18,107 +19,71 @@ End-of-Phase-Kriterium:
 
 ---
 
-## 2. Offene Designfragen (vor Phase-Start klären)
+## 2. Getroffene Designentscheidungen
 
 ### A) FastMCP-Version
-FastMCP hatte zwischen 1.x und 2.x Breaking-Changes. Vorschlag:
-**aktuelle stabile Version pinnen** (`fastmcp>=2,<3` o.ä.), Pin in
-`pyproject.toml` festschreiben. Im neuen Chat zuerst per `pip index`
-oder `pypi` den aktuellen Stand prüfen, **bevor** Code geschrieben wird.
+**Entschieden:** aktuelle stabile 3.x pinnen (`fastmcp>=3,<4`). Stand
+beim Phase-Start war 3.2.4 als neuestes Release der 3er-Linie. Die
+2.x-Linie wurde verworfen, weil sie absehbar EOL geht und Phase 3
+sonst eine Major-Migration mitschleppen müsste.
 
 ### B) Transport: stdio vs HTTP
-* **stdio** – Claude Code / Claude Desktop verwenden das nativ. Einfach
-  zu testen.
-* **HTTP/SSE** – wird in Phase 3 fürs Deployment gebraucht
-  (`journal.last-strawberry.com`).
-
-**Vorschlag:** in Phase 2 **beides** vorsehen, mit einem CLI-Flag
-(`--transport stdio|http`). Default `stdio` für lokale Entwicklung.
-HTTP-Stub schon einrichten, damit Phase 3 nur noch Auth/Proxy ergänzt.
-
-**Alternative:** in Phase 2 nur stdio, HTTP komplett in Phase 3. Spart
-Code jetzt, kostet später eine Refactoring-Runde. **Entscheidung steht
-aus.**
+**Entschieden:** stdio + HTTP-Stub via CLI-Flag. `--transport stdio|http`,
+Default `stdio` für lokale Entwicklung. HTTP-Stub schon einrichten,
+damit Phase 3 nur noch Auth/Proxy ergänzt.
 
 ### C) Sync vs Async DB
-FastMCP-Tools sind `async`. Drei Optionen:
-
-1. `JournalDB` bleibt synchron, MCP-Tools rufen sie direkt auf.
-   → Blockiert den Event-Loop bei jedem DB-Call. Für ein Tool mit
-   <100 req/min und SQLite auf lokaler Platte: vermutlich egal.
-2. `JournalDB` bleibt synchron, MCP-Tools wrappen Calls in
-   `asyncio.to_thread(...)`.
-   → Sauberer, kein Refactoring der Phase-1-Klasse nötig.
-3. `JournalDB` wird auf `aiosqlite` umgebaut.
-   → Sauberste Variante, aber Phase-1-Tests müssen umgeschrieben werden.
-
-**Vorschlag:** Option 2. Minimaler Eingriff, kein Re-Test der
-Phase-1-Klasse. Die `to_thread`-Wraps liegen in `JournalMCPServer`,
-nicht in `JournalDB`.
+**Entschieden:** `JournalDB` bleibt synchron, MCP-Tools wrappen Calls
+in `asyncio.to_thread(...)`. Wraps liegen in `JournalMCPServer`, nicht
+in `JournalDB`. Kein Re-Test der Phase-1-Klasse nötig.
 
 ### D) DB-Pfad-Discovery
-Woher kennt der Server den Pfad zur SQLite-Datei?
+**Entschieden:** alle drei Quellen mit Priorität CLI > Env > Default.
 
-* CLI-Argument (`--db /opt/bramble/data/bramble.db`)
-* Umgebungsvariable (`BRAMBLE_DB_PATH`)
-* Default (`./data/bramble.db`)
+* CLI-Argument: `--db /opt/bramble/data/bramble.db`
+* Umgebungsvariable: `BRAMBLE_DB_PATH`
+* Default: `./data/bramble.db`
 
-**Vorschlag:** alle drei, in dieser Priorität: CLI > Env > Default.
 Phase 3 setzt die Env-Var im systemd-Unit, Phase 2 nutzt den Default.
 
 ### E) Projekt-Namen-Validierung im MCP-Layer
-`JournalEntry` akzeptiert jeden non-empty String. Sollte der
-MCP-Layer zusätzlich kebab-case erzwingen (`^[a-z0-9][a-z0-9-]*$`)?
+**Entschieden (Abweichung vom Konzept-Vorschlag):** kebab-case
+**wird im MCP-Layer erzwungen** (`^[a-z0-9][a-z0-9-]*$`). `JournalDB`
+bleibt projekt-agnostisch und akzeptiert weiter jeden non-empty String –
+die Härtung lebt nur im MCP-Tool. So bleibt die Phase-1-Klasse für
+interne/legacy Calls offen, während das öffentliche Tool eine
+einheitliche Konvention durchsetzt.
 
-**Vorschlag:** **Nein, in Phase 2 nicht.** Bramble ist projekt-agnostisch
-(siehe System-Prompt). Konvention dokumentieren, nicht erzwingen.
-Wenn Phase 5 doch Probleme zeigt, im MCP-Layer nachrüsten – nicht in
-`JournalDB`.
-
-### F) `list_projects()`-Rückgabe erweitern?
-In Phase 1 als Schuld markiert: liefert nur Namen, kein Count, kein
-letzter Timestamp. Für `journal_list_projects` als MCP-Tool wäre das
-nützlich („was wurde wo zuletzt geschrieben“).
-
-**Vorschlag:** Erweitern. Neue Methode `JournalDB.project_overview()` →
+### F) `list_projects()`-Rückgabe erweitern
+**Entschieden:** neue Methode `JournalDB.project_overview()` →
 `list[ProjectSummary]` mit `(name, entry_count, last_timestamp)`.
 `list_projects()` bleibt für Legacy/Interne Calls. MCP-Tool nutzt die
 neue Methode.
 
 ### G) FTS5-Query-Hardening
-Phase-1-Schuld: rohe FTS5-Syntax wird durchgereicht. Im MCP-Layer
-bewusst gestalten:
-
-* **Option α:** Roh durchreichen, Power-User dürfen `AND`, `NEAR`, etc.
-* **Option β:** Standardmäßig in Phrasen-Quotes wrappen (`"foo bar"`),
-  Boolean-Operatoren nur über expliziten Parameter.
-
-**Vorschlag:** **Option α** mit Doku im Tool-Description. Bramble wird
-von Claude bedient, nicht von Endnutzern – Claude kann FTS5-Syntax
-korrekt formulieren.
+**Entschieden:** roh durchreichen, mit klarer Doku im Tool-Description.
+Bramble wird von Claude bedient, nicht von Endnutzern – Claude kann
+FTS5-Syntax (AND, NEAR, Phrasen-Quotes) korrekt formulieren. Fehlerhafte
+Syntax liefert weiterhin eine leere Liste (Phase-1-Verhalten).
 
 ### H) Fehler-Surfacing in MCP-Tools
-`JournalDB` wirft `TypeError` / `ValueError` bei schlechten Inputs.
-MCP-Tools sollten diese in MCP-Fehler übersetzen (mit lesbarer Message
-für den Client), nicht crashen.
-
-**Vorschlag:** Decorator oder zentraler `try/except`-Block in jedem
-Tool, der `ValueError`/`TypeError` in MCP-kompatible Fehler übersetzt.
-Andere Exceptions als `RuntimeError` durchreichen + loggen.
+**Entschieden:** Decorator pro Tool. Ein zentraler `@translate_errors`-
+Decorator wandelt `ValueError` / `TypeError` aus `JournalDB` in
+MCP-kompatible Fehler mit lesbarer Message für den Client. Andere
+Exceptions werden als `RuntimeError` durchgereicht und zusätzlich
+geloggt.
 
 ### I) Logging
-Standard-`logging` mit Modul-Loggern. JSON-Logs oder plain? Für Phase 2
-**plain reicht**, JSON kommt in Phase 3 (strukturiertes Logging für
-Fail2Ban). Trotzdem schon `logging.basicConfig` zentral, damit Phase 3
-nur den Handler tauscht.
+**Entschieden (Abweichung vom Konzept-Vorschlag):** **JSON-Logging
+schon in Phase 2**, via `python-json-logger`. Modul-Logger pro Datei,
+zentrales Setup in einem `logging_setup`-Modul. So kann Phase 3 direkt
+Fail2Ban anschliessen, ohne nochmals am Format zu drehen.
 
 ### J) Tests
-FastMCP bringt typischerweise einen In-Process-Test-Client mit. Damit
-`JournalMCPServer` ohne echten Netzwerk-Roundtrip testen.
-
-**Vorschlag:** ein Test pro Tool für Happy-Path + ein Test pro Tool
-für den jeweils relevanten Fehler-Pfad. Plus ein Test für
-Dependency-Injection (Server akzeptiert übergebene `JournalDB`-Instanz).
+**Entschieden:** FastMCP-In-Process-Test-Client. Pro Tool ein
+Happy-Path-Test und ein Test für den jeweils relevanten Fehler-Pfad.
+Plus ein DI-Test (Server akzeptiert eine übergebene `JournalDB`-
+Instanz).
 
 ---
 
@@ -128,6 +93,8 @@ Dependency-Injection (Server akzeptiert übergebene `JournalDB`-Instanz).
 |---|---|---|
 | `src/bramble/journal_mcp_server.py` | `JournalMCPServer` | Tool-Registrierung, DI für `JournalDB`, Transport-Wahl |
 | `src/bramble/server_config.py` | `ServerConfig` | CLI-Arg + Env + Default zu einem Config-Objekt vereinen |
+| `src/bramble/logging_setup.py` | – | Zentrales JSON-Logging via `python-json-logger` |
+| `src/bramble/mcp_errors.py` | – | `@translate_errors`-Decorator für Tool-Funktionen |
 | `src/bramble/__main__.py` | – | CLI-Entry-Point (`python -m bramble` oder Console-Script `bramble-server`) |
 | `src/bramble/journal_db.py` | + `project_overview()` | Phase-1-Klasse, einzige Erweiterung: neue Read-Methode |
 
@@ -144,24 +111,29 @@ Optional, falls Phase 2 in einem Chat zu viel wird:
 ## 4. Tool-Verträge
 
 Alle Tools sind `async` und nehmen ausschließlich validierbare,
-primitive Typen entgegen (kompatibel mit MCP-Schemas).
+primitive Typen entgegen (kompatibel mit MCP-Schemas). `project` muss
+in **allen** Tools dem Muster `^[a-z0-9][a-z0-9-]*$` entsprechen
+(Entscheidung E).
 
 ### `journal_read(project: str, n: int = 80) -> list[dict]`
 * **Returns:** Liste von Entry-Dicts (`id`, `project`, `timestamp`,
   `status`, `phase`, `title`, `content`), neueste zuerst.
-* **Errors:** `ValueError` bei leerem `project` oder `n<=0`.
+* **Errors:** `ValueError` bei leerem / nicht-kebab-case `project` oder
+  `n<=0`.
 
 ### `journal_append(project: str, status: str, content: str, phase: str | None = None, title: str | None = None) -> dict`
 * **Returns:** Der neu geschriebene Entry (inkl. zugewiesener `id`).
 * **Errors:** `ValueError` bei ungültigem `status` (nicht in
-  `JournalStatus`), leerem `project` / `content`.
+  `JournalStatus`), leerem / nicht-kebab-case `project`, leerem
+  `content`.
 * **Timestamp** wird **serverseitig** gesetzt (`datetime.now(UTC)`). Der
   Client kann den nicht überschreiben – das schützt vor Uhren-Drift
   und Manipulation.
 
 ### `journal_search(project: str, query: str, limit: int = 20) -> list[dict]`
 * **Returns:** Trefferliste, neueste zuerst.
-* **Errors:** `ValueError` bei leerem `project`/`query`, `limit<=0`.
+* **Errors:** `ValueError` bei leerem / nicht-kebab-case `project`,
+  leerem `query`, `limit<=0`.
 * Fehlerhafte FTS5-Syntax liefert leere Liste (wie in Phase 1).
 
 ### `journal_list_projects() -> list[dict]`
@@ -176,8 +148,9 @@ primitive Typen entgegen (kompatibel mit MCP-Schemas).
 * **Auth (Bearer-Token):** Phase 3. In Phase 2 läuft der Server ungeschützt,
   weil nur lokal über stdio bzw. `127.0.0.1` erreichbar.
 * **Rate-Limit:** Phase 3.
-* **Strukturiertes JSON-Logging + Fail2Ban-Hooks:** Phase 3.
-* **systemd-Unit, Nginx-Config:** Phase 3.
+* **Fail2Ban-Hooks / systemd-Unit / Nginx-Config:** Phase 3. Das
+  Log-Format ist bereits JSON, sodass Phase 3 nur noch den Filter
+  schreiben muss.
 * **`AuthValidator` / `RateLimiter`-Klassen:** Phase 3. *Aber*: die DI
   in `JournalMCPServer` muss so gebaut sein, dass die in Phase 3
   einfach mit reingereicht werden – Konstruktor-Slots planen, nicht
@@ -209,7 +182,8 @@ primitive Typen entgegen (kompatibel mit MCP-Schemas).
 * Commits in Etappen, nicht ein einziger Mega-Commit:
   1. `project_overview()` + Tests (kleine Erweiterung Phase-1-Code)
   2. `ServerConfig`-Klasse + Tests
-  3. `JournalMCPServer`-Gerüst (Tool-Registrierung leer, DI fertig)
-  4. Die vier Tools einzeln, jeder mit eigenem Test-Commit
-  5. `__main__.py` + End-to-End-Smoke-Test
+  3. `logging_setup` + `mcp_errors`-Decorator + Tests
+  4. `JournalMCPServer`-Gerüst (Tool-Registrierung leer, DI fertig)
+  5. Die vier Tools einzeln, jeder mit eigenem Test-Commit
+  6. `__main__.py` + End-to-End-Smoke-Test
 * Kein Push, kein PR durch Claude.
