@@ -253,3 +253,62 @@ Tooling-Anmerkung (nicht im Code):
 
 Branch ist NICHT gepusht. Naechster Schritt: chore/phase-2-cleanup
 auf GitHub pushen, PR aufmachen, mergen, dann Phase 3 starten.
+
+## Bugfix: Lazy FastMCP-Import im Paket-Init
+Datum: 2026-05-12 (UTC)
+Branch: chore/phase-2-cleanup (Follow-up auf das Cleanup)
+
+Ausloeser: Review-Kommentar von chatgpt-codex-connector am PR.
+Praezise und korrekt:
+
+> In a fresh checkout without runtime deps installed, scripts/init_db.py
+> is intended to work by adding src/ to sys.path, but
+> "from bramble.journal_db import JournalDB" first executes this
+> package initializer. This new top-level JournalMCPServer import loads
+> bramble.journal_mcp_server, which imports fastmcp, so the DB bootstrap
+> path now crashes with ModuleNotFoundError: fastmcp before even showing
+> --help, despite only needing SQLite.
+
+Reproduziert:
+- `python -c "import bramble; ..."` zeigte: "fastmcp loaded: True"
+- Damit waere init_db.py auf einem frischen Clone ohne fastmcp
+  abgestuerzt.
+
+Fix:
+- bramble/__init__.py mit __getattr__ (PEP 562) umgebaut.
+- Datenklassen + ServerConfig werden eager geladen (nur stdlib).
+- JournalMCPServer wird erst beim Attribut-Zugriff geladen.
+- __dir__ ergaenzt, damit IDE-Discovery JournalMCPServer findet.
+- TYPE_CHECKING-Block fuer Type-Checker (pyright/mypy).
+- Result wird im Modul gecached (setattr), damit wiederholte
+  Zugriffe nicht jedes Mal __getattr__ durchlaufen.
+
+Regression-Tests:
+- tests/test_package_init.py mit sechs Faellen:
+  1. import bramble -> kein fastmcp in sys.modules
+  2. from bramble.journal_db import JournalDB -> kein fastmcp
+     (genau der init_db.py-Bootstrap-Pfad)
+  3. from bramble import JournalMCPServer funktioniert
+  4. Zugriff auf JournalMCPServer triggert fastmcp-Load (lazy != never)
+  5. Tippfehler raisen weiterhin AttributeError
+  6. JournalMCPServer ist in dir(bramble) sichtbar
+
+  Alle sechs laufen in subprocess, weil pytest-Suite selbst fastmcp
+  schon importiert hat (sys.modules ist im Test-Prozess kontaminiert).
+
+Verifikation:
+- pytest: 158 passed (vorher 152 + 6 neue Regression-Tests)
+- Manuell:
+    import bramble                           -> kein fastmcp
+    from bramble.journal_db import JournalDB -> kein fastmcp
+    from bramble import JournalMCPServer     -> fastmcp wird geladen
+- Smoke-Test (HTTP-Server, alle vier Tools, Negativpfade): gruen.
+
+Lessons learned:
+- "Alle Tests gruen" bedeutet nicht "keine Regression". Die pytest-
+  Suite laeuft in einer Umgebung mit allen Deps -- ein
+  Bootstrap-Test gegen fehlende Deps fehlte komplett. Den gibt es
+  jetzt.
+- Beim Erweitern von Paket-Init-Imports kuenftig pruefen, welche
+  transitiven Deps man dabei einzieht. Das sollte ein Standard-
+  Checklisten-Punkt fuer Aufraeum-Arbeiten werden.
