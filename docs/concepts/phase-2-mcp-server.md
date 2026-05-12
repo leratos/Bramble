@@ -1,8 +1,9 @@
 # Phase 2 – FastMCP-Server
 
-Status: **Entschieden, in Umsetzung.** Designfragen aus dem Konzept
-sind abgehakt; siehe Abschnitt 2 für die getroffenen Entscheidungen
-und Abweichungen vom ursprünglichen Vorschlag.
+Status: **Abgeschlossen** (2026-05-12). PR #1 ist nach `main` gemergt.
+Anschließendes Cleanup-Paket auf `chore/phase-2-cleanup`.
+Dieses Dokument bleibt als Phase-2-Artefakt erhalten – nicht mehr
+ändern, ausser für Rück-Verweise aus späteren Phasen.
 
 ## 1. Ziel von Phase 2
 
