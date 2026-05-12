@@ -214,7 +214,25 @@ class JournalMCPServer:
             entries = await asyncio.to_thread(db.search, project, query, limit)
             return [_entry_to_dict(e) for e in entries]
 
-        # Etappe 4d: journal_list_projects
+        @app.tool
+        @translate_errors
+        async def journal_list_projects() -> list[dict[str, Any]]:
+            """List all projects with entry counts and most recent timestamps.
+
+            Returned in descending order of ``last_timestamp`` (most
+            recent activity first), with alphabetical tie-break for
+            stability.
+            """
+
+            summaries = await asyncio.to_thread(db.project_overview)
+            return [
+                {
+                    "project": s.name,
+                    "entry_count": s.entry_count,
+                    "last_timestamp": s.last_timestamp_iso(),
+                }
+                for s in summaries
+            ]
 
     # ------------------------------------------------------------------
     # Transport entry point

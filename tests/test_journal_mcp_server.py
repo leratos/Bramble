@@ -122,7 +122,12 @@ class TestToolRegistry:
         async with Client(server.app) as client:
             tools = await client.list_tools()
         names = sorted(t.name for t in tools)
-        assert names == ["journal_append", "journal_read", "journal_search"]
+        assert names == [
+            "journal_append",
+            "journal_list_projects",
+            "journal_read",
+            "journal_search",
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -376,6 +381,59 @@ class TestJournalSearch:
                     "journal_search",
                     {"project": "bramble", "query": "x", "limit": 0},
                 )
+
+
+# ---------------------------------------------------------------------------
+# journal_list_projects
+# ---------------------------------------------------------------------------
+class TestJournalListProjects:
+    async def test_empty_db_returns_empty_list(
+        self, server: JournalMCPServer
+    ) -> None:
+        async with Client(server.app) as client:
+            result = await client.call_tool("journal_list_projects", {})
+        assert result.data == []
+
+    async def test_happy_path_returns_counts_and_timestamps(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        base = datetime(2026, 5, 12, 8, 0, tzinfo=UTC)
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="b1",
+                timestamp=base,
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="b2",
+                timestamp=base + timedelta(minutes=5),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.NOTIZ,
+                content="e1",
+                timestamp=base + timedelta(minutes=10),
+            )
+        )
+
+        async with Client(server.app) as client:
+            result = await client.call_tool("journal_list_projects", {})
+
+        # Most recent activity first.
+        names = [row["project"] for row in result.data]
+        assert names == ["elder-berry", "bramble"]
+        by_name = {row["project"]: row for row in result.data}
+        assert by_name["bramble"]["entry_count"] == 2
+        assert by_name["bramble"]["last_timestamp"] == "2026-05-12T08:05:00+00:00"
+        assert by_name["elder-berry"]["entry_count"] == 1
+        assert by_name["elder-berry"]["last_timestamp"] == "2026-05-12T08:10:00+00:00"
 
 
 # ---------------------------------------------------------------------------
