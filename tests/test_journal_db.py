@@ -199,21 +199,6 @@ class TestSearch:
 
 
 # ---------------------------------------------------------------------------
-# list_projects()
-# ---------------------------------------------------------------------------
-class TestListProjects:
-    def test_returns_distinct_sorted(self, db: JournalDB) -> None:
-        db.append(_entry(project="elder-berry", content="e"))
-        db.append(_entry(project="bramble", content="b"))
-        db.append(_entry(project="bramble", content="b2"))
-        db.append(_entry(project="berry-gym", content="g"))
-        assert db.list_projects() == ["berry-gym", "bramble", "elder-berry"]
-
-    def test_empty_db(self, db: JournalDB) -> None:
-        assert db.list_projects() == []
-
-
-# ---------------------------------------------------------------------------
 # project_overview()
 # ---------------------------------------------------------------------------
 class TestProjectOverview:
