@@ -27,7 +27,7 @@ from typing import Any
 from fastmcp import FastMCP
 
 from bramble.journal_db import JournalDB
-from bramble.journal_entry import JournalEntry
+from bramble.journal_entry import JournalEntry, JournalStatus
 from bramble.mcp_errors import translate_errors
 
 logger = logging.getLogger(__name__)
@@ -159,7 +159,41 @@ class JournalMCPServer:
             entries = await asyncio.to_thread(db.read, project, n)
             return [_entry_to_dict(e) for e in entries]
 
-        # Etappe 4b: journal_append
+        @app.tool
+        @translate_errors
+        async def journal_append(
+            project: str,
+            status: str,
+            content: str,
+            phase: str | None = None,
+            title: str | None = None,
+        ) -> dict[str, Any]:
+            """Append a new journal entry and return it with its assigned id.
+
+            ``status`` must be one of: ``in_arbeit``, ``abgeschlossen``,
+            ``notiz``, ``bugfix``. The timestamp is set server-side
+            (``datetime.now(UTC)``); clients cannot override it.
+            """
+
+            _require_kebab_case(project)
+            allowed = ", ".join(s.value for s in JournalStatus)
+            try:
+                status_enum = JournalStatus(status)
+            except ValueError as exc:
+                raise ValueError(
+                    f"status {status!r} is not allowed; must be one of: {allowed}"
+                ) from exc
+
+            entry = JournalEntry(
+                project=project,
+                status=status_enum,
+                content=content,
+                phase=phase,
+                title=title,
+            )
+            persisted = await asyncio.to_thread(db.append, entry)
+            return _entry_to_dict(persisted)
+
         # Etappe 4c: journal_search
         # Etappe 4d: journal_list_projects
 

@@ -122,7 +122,7 @@ class TestToolRegistry:
         async with Client(server.app) as client:
             tools = await client.list_tools()
         names = sorted(t.name for t in tools)
-        assert names == ["journal_read"]
+        assert names == ["journal_append", "journal_read"]
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +199,97 @@ class TestJournalRead:
                 "journal_read", {"project": "no-such-project"}
             )
         assert result.data == []
+
+
+# ---------------------------------------------------------------------------
+# journal_append
+# ---------------------------------------------------------------------------
+class TestJournalAppend:
+    async def test_happy_path_returns_entry_with_id(
+        self, server: JournalMCPServer
+    ) -> None:
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_append",
+                {
+                    "project": "bramble",
+                    "status": "notiz",
+                    "content": "kickoff entry",
+                },
+            )
+        assert isinstance(result.data, dict)
+        assert isinstance(result.data["id"], int) and result.data["id"] > 0
+        assert result.data["project"] == "bramble"
+        assert result.data["status"] == "notiz"
+        assert result.data["content"] == "kickoff entry"
+        assert result.data["phase"] is None
+        assert result.data["title"] is None
+
+    async def test_optional_fields_are_persisted(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        async with Client(server.app) as client:
+            await client.call_tool(
+                "journal_append",
+                {
+                    "project": "elder-berry",
+                    "status": "abgeschlossen",
+                    "content": "done",
+                    "phase": "Phase 1",
+                    "title": "Closeout",
+                },
+            )
+        [stored] = db.read("elder-berry")
+        assert stored.phase == "Phase 1"
+        assert stored.title == "Closeout"
+        assert stored.status is JournalStatus.ABGESCHLOSSEN
+
+    async def test_timestamp_is_server_set(
+        self, server: JournalMCPServer
+    ) -> None:
+        before = datetime.now(tz=UTC)
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_append",
+                {"project": "bramble", "status": "notiz", "content": "ts"},
+            )
+        after = datetime.now(tz=UTC)
+        ts = datetime.fromisoformat(result.data["timestamp"])
+        assert before - timedelta(seconds=1) <= ts <= after + timedelta(seconds=1)
+
+    async def test_rejects_unknown_status(self, server: JournalMCPServer) -> None:
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="not allowed"):
+                await client.call_tool(
+                    "journal_append",
+                    {
+                        "project": "bramble",
+                        "status": "in_progress",
+                        "content": "x",
+                    },
+                )
+
+    async def test_rejects_empty_content(self, server: JournalMCPServer) -> None:
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="content"):
+                await client.call_tool(
+                    "journal_append",
+                    {
+                        "project": "bramble",
+                        "status": "notiz",
+                        "content": "   ",
+                    },
+                )
+
+    async def test_rejects_non_kebab_case_project(
+        self, server: JournalMCPServer
+    ) -> None:
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="kebab-case"):
+                await client.call_tool(
+                    "journal_append",
+                    {"project": "Bad", "status": "notiz", "content": "x"},
+                )
 
 
 # ---------------------------------------------------------------------------
