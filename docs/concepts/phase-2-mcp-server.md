@@ -22,9 +22,10 @@ End-of-Phase-Kriterium:
 ## 2. Getroffene Designentscheidungen
 
 ### A) FastMCP-Version
-**Entschieden:** aktuelle stabile 2.x pinnen (`fastmcp>=2,<3`). Vor dem
-ersten Code-Schreiben per `pip index` o. ä. den aktuellen Stand
-prüfen und die exakte Range in `pyproject.toml` festschreiben.
+**Entschieden:** aktuelle stabile 3.x pinnen (`fastmcp>=3,<4`). Stand
+beim Phase-Start war 3.2.4 als neuestes Release der 3er-Linie. Die
+2.x-Linie wurde verworfen, weil sie absehbar EOL geht und Phase 3
+sonst eine Major-Migration mitschleppen müsste.
 
 ### B) Transport: stdio vs HTTP
 **Entschieden:** stdio + HTTP-Stub via CLI-Flag. `--transport stdio|http`,
