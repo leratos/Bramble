@@ -25,9 +25,11 @@ import logging
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 from bramble.journal_entry import JournalEntry
+from bramble.project_summary import ProjectSummary
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +255,49 @@ class JournalDB:
         with self._connect() as conn:
             rows = conn.execute(sql).fetchall()
         return [row["project"] for row in rows]
+
+    def project_overview(self) -> list[ProjectSummary]:
+        """Return one :class:`ProjectSummary` per project, newest activity first.
+
+        For each distinct ``project`` in :class:`JournalEntry` storage,
+        the summary contains the entry count and the most recent
+        timestamp. Projects with zero entries are not listed (they
+        cannot exist, since insertion is the only way to create a
+        project).
+
+        Ordering: descending by ``last_timestamp``. Ties – which can
+        legitimately occur when two entries share a timestamp string –
+        are broken alphabetically by project name to keep the output
+        stable across calls.
+        """
+
+        # ISO-8601 strings with the same UTC offset compare
+        # lexicographically the same way the underlying datetimes do.
+        # ``JournalEntry`` enforces UTC, so this MAX/ORDER BY is safe.
+        sql = (
+            "SELECT project, COUNT(*) AS entry_count, "
+            "       MAX(timestamp) AS last_ts "
+            "FROM journal_entries "
+            "GROUP BY project "
+            "ORDER BY last_ts DESC, project ASC"
+        )
+        with self._connect() as conn:
+            rows = conn.execute(sql).fetchall()
+
+        summaries: list[ProjectSummary] = []
+        for row in rows:
+            ts = datetime.fromisoformat(row["last_ts"])
+            if ts.tzinfo is None:
+                # Defensive: legacy rows might be naive. Treat as UTC.
+                ts = ts.replace(tzinfo=UTC)
+            summaries.append(
+                ProjectSummary(
+                    name=row["project"],
+                    entry_count=row["entry_count"],
+                    last_timestamp=ts,
+                )
+            )
+        return summaries
 
     # ------------------------------------------------------------------
     # Private helpers
