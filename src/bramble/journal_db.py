@@ -251,14 +251,6 @@ class JournalDB:
             return []
         return [self._row_to_entry(row) for row in rows]
 
-    def list_projects(self) -> list[str]:
-        """Return all distinct project identifiers, sorted alphabetically."""
-
-        sql = "SELECT DISTINCT project FROM journal_entries ORDER BY project"
-        with self._connect() as conn:
-            rows = conn.execute(sql).fetchall()
-        return [row["project"] for row in rows]
-
     def project_overview(self) -> list[ProjectSummary]:
         """Return one :class:`ProjectSummary` per project, newest activity first.
 
