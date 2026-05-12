@@ -5,8 +5,11 @@ schema. It is intentionally synchronous and uses one short-lived
 connection per public method via a context manager. This keeps the
 class trivially safe for both threaded and asyncio callers (each call
 gets its own connection) at the cost of slightly more overhead per
-query. Phase 2 may switch to ``aiosqlite`` behind the same public
-interface; no caller should need to change.
+query. Async callers wrap method invocations in
+:func:`asyncio.to_thread` at the MCP layer (see
+:class:`bramble.journal_mcp_server.JournalMCPServer`); this class
+deliberately stays out of the async machinery so its Phase-1 tests
+remain valid.
 
 The schema follows the spec in the project root README, plus a few
 defensive additions:
