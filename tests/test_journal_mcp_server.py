@@ -1,18 +1,21 @@
-"""Tests for the JournalMCPServer scaffolding (Etappe 3).
-
-Tools themselves are added in later etappen; these tests verify
-construction, DI, the public surface, and transport pre-validation.
-"""
+"""Tests for the JournalMCPServer and its tool implementations."""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastmcp import Client, FastMCP
+from fastmcp.exceptions import ToolError
 
 from bramble.journal_db import JournalDB
-from bramble.journal_mcp_server import JournalMCPServer
+from bramble.journal_entry import JournalEntry, JournalStatus
+from bramble.journal_mcp_server import (
+    JournalMCPServer,
+    _entry_to_dict,
+    _require_kebab_case,
+)
 
 
 @pytest.fixture()
@@ -55,14 +58,147 @@ class TestConstruction:
 
 
 # ---------------------------------------------------------------------------
-# Tool registry (state at end of Etappe 3)
+# Validation helpers
+# ---------------------------------------------------------------------------
+class TestRequireKebabCase:
+    @pytest.mark.parametrize(
+        "good", ["bramble", "elder-berry", "a", "a1", "1ab", "a-b-c"]
+    )
+    def test_accepts_kebab_case(self, good: str) -> None:
+        _require_kebab_case(good)  # must not raise
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "",
+            " ",
+            "Bramble",
+            "BRAMBLE",
+            "with space",
+            "snake_case",
+            "-leading",
+            "with.dot",
+            "with/slash",
+        ],
+    )
+    def test_rejects_non_kebab_case(self, bad: str) -> None:
+        with pytest.raises(ValueError, match="kebab-case"):
+            _require_kebab_case(bad)
+
+    def test_rejects_non_string(self) -> None:
+        with pytest.raises(TypeError):
+            _require_kebab_case(123)  # type: ignore[arg-type]
+
+
+class TestEntryToDict:
+    def test_round_trips_all_fields(self) -> None:
+        ts = datetime(2026, 5, 12, 9, 0, tzinfo=UTC)
+        entry = JournalEntry(
+            project="bramble",
+            status=JournalStatus.ABGESCHLOSSEN,
+            content="body",
+            phase="Phase 2",
+            title="Title",
+            timestamp=ts,
+            id=42,
+        )
+        d = _entry_to_dict(entry)
+        assert d == {
+            "id": 42,
+            "project": "bramble",
+            "timestamp": "2026-05-12T09:00:00+00:00",
+            "status": "abgeschlossen",
+            "phase": "Phase 2",
+            "title": "Title",
+            "content": "body",
+        }
+
+
+# ---------------------------------------------------------------------------
+# Tool registry
 # ---------------------------------------------------------------------------
 class TestToolRegistry:
-    async def test_no_tools_registered_yet(self, server: JournalMCPServer) -> None:
-        # Etappe 3 only wires the scaffolding. Tools are added in 4a-d.
+    async def test_expected_tools_are_registered(self, server: JournalMCPServer) -> None:
         async with Client(server.app) as client:
             tools = await client.list_tools()
-        assert tools == []
+        names = sorted(t.name for t in tools)
+        assert names == ["journal_read"]
+
+
+# ---------------------------------------------------------------------------
+# journal_read
+# ---------------------------------------------------------------------------
+class TestJournalRead:
+    async def test_happy_path_returns_dicts_newest_first(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        base = datetime(2026, 5, 12, 8, 0, tzinfo=UTC)
+        for i in range(3):
+            db.append(
+                JournalEntry(
+                    project="bramble",
+                    status=JournalStatus.NOTIZ,
+                    content=f"entry-{i}",
+                    timestamp=base + timedelta(minutes=i),
+                )
+            )
+
+        async with Client(server.app) as client:
+            result = await client.call_tool("journal_read", {"project": "bramble"})
+
+        assert isinstance(result.data, list)
+        assert [r["content"] for r in result.data] == ["entry-2", "entry-1", "entry-0"]
+        for r in result.data:
+            assert set(r.keys()) == {
+                "id",
+                "project",
+                "timestamp",
+                "status",
+                "phase",
+                "title",
+                "content",
+            }
+
+    async def test_respects_n_argument(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        base = datetime(2026, 5, 12, 8, 0, tzinfo=UTC)
+        for i in range(5):
+            db.append(
+                JournalEntry(
+                    project="bramble",
+                    status=JournalStatus.NOTIZ,
+                    content=f"e{i}",
+                    timestamp=base + timedelta(minutes=i),
+                )
+            )
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_read", {"project": "bramble", "n": 2}
+            )
+        assert len(result.data) == 2
+
+    async def test_rejects_non_kebab_case_project(
+        self, server: JournalMCPServer
+    ) -> None:
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="kebab-case"):
+                await client.call_tool("journal_read", {"project": "Bad Name"})
+
+    async def test_rejects_non_positive_n(self, server: JournalMCPServer) -> None:
+        # JournalDB raises ValueError; translate_errors converts it.
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="positive"):
+                await client.call_tool("journal_read", {"project": "bramble", "n": 0})
+
+    async def test_returns_empty_list_for_unknown_project(
+        self, server: JournalMCPServer
+    ) -> None:
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_read", {"project": "no-such-project"}
+            )
+        assert result.data == []
 
 
 # ---------------------------------------------------------------------------

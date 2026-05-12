@@ -19,14 +19,56 @@ MCP tools exist. Tools themselves come in Etappen 4a–4d.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 from typing import Any
 
 from fastmcp import FastMCP
 
 from bramble.journal_db import JournalDB
+from bramble.journal_entry import JournalEntry
+from bramble.mcp_errors import translate_errors
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Validation helpers (Decision E: kebab-case enforced in the MCP layer)
+# ---------------------------------------------------------------------------
+_KEBAB_CASE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+
+def _require_kebab_case(project: str) -> None:
+    """Reject any project identifier that is not strict kebab-case.
+
+    The pattern matches lowercase letters, digits and hyphens with a
+    non-hyphen first character. Whitespace, underscores, mixed case
+    and empty strings all fail. The check lives in the MCP layer only
+    – :class:`JournalDB` itself remains project-agnostic.
+    """
+
+    if not isinstance(project, str):
+        raise TypeError("project must be a string")
+    if not _KEBAB_CASE_RE.match(project):
+        raise ValueError(
+            f"project {project!r} must match kebab-case pattern "
+            "^[a-z0-9][a-z0-9-]*$"
+        )
+
+
+def _entry_to_dict(entry: JournalEntry) -> dict[str, Any]:
+    """Serialise a :class:`JournalEntry` to a plain MCP-friendly dict."""
+
+    return {
+        "id": entry.id,
+        "project": entry.project,
+        "timestamp": entry.timestamp_iso(),
+        "status": entry.status.value,
+        "phase": entry.phase,
+        "title": entry.title,
+        "content": entry.content,
+    }
 
 
 class JournalMCPServer:
@@ -94,13 +136,29 @@ class JournalMCPServer:
     def _register_tools(self) -> None:
         """Register all MCP tools on :attr:`app`.
 
-        Tools are added in Phase-2 Etappen 4a–4d. The empty body here
-        is on purpose – it gives a single place where the four tool
-        registrations will live, instead of scattering ``@app.tool``
-        decorators across the module.
+        All four tools live in this single method on purpose: the
+        ``self`` closure means each tool implicitly carries the
+        :class:`JournalDB` it talks to, and keeping the registrations
+        together makes the public surface of the server obvious at a
+        glance.
         """
 
-        # Etappe 4a: journal_read
+        app = self._app
+        db = self._db
+
+        @app.tool
+        @translate_errors
+        async def journal_read(project: str, n: int = 80) -> list[dict[str, Any]]:
+            """Return the ``n`` most recent journal entries for ``project``.
+
+            Entries are returned newest first. ``project`` must match
+            the kebab-case pattern ``^[a-z0-9][a-z0-9-]*$``.
+            """
+
+            _require_kebab_case(project)
+            entries = await asyncio.to_thread(db.read, project, n)
+            return [_entry_to_dict(e) for e in entries]
+
         # Etappe 4b: journal_append
         # Etappe 4c: journal_search
         # Etappe 4d: journal_list_projects
