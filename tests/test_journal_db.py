@@ -1,0 +1,238 @@
+"""Unit tests for :class:`bramble.journal_db.JournalDB`."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+from bramble.journal_db import JournalDB
+from bramble.journal_entry import JournalEntry, JournalStatus
+
+
+def _entry(
+    project: str = "bramble",
+    *,
+    content: str = "hello",
+    status: JournalStatus = JournalStatus.NOTIZ,
+    phase: str | None = None,
+    title: str | None = None,
+    timestamp: datetime | None = None,
+) -> JournalEntry:
+    return JournalEntry(
+        project=project,
+        status=status,
+        content=content,
+        phase=phase,
+        title=title,
+        timestamp=timestamp or datetime.now(tz=UTC),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Construction & initialisation
+# ---------------------------------------------------------------------------
+class TestJournalDBInit:
+    def test_initialize_is_idempotent(self, db_path: Path) -> None:
+        db = JournalDB(db_path)
+        db.initialize()
+        db.initialize()  # must not raise
+
+    def test_initialize_creates_parent_directory(self, tmp_path: Path) -> None:
+        nested = tmp_path / "deep" / "deeper" / "bramble.db"
+        db = JournalDB(nested)
+        db.initialize()
+        assert nested.exists()
+
+    def test_db_path_accepts_str(self, tmp_path: Path) -> None:
+        str_path = str(tmp_path / "via-str.db")
+        db = JournalDB(str_path)
+        db.initialize()
+        assert db.db_path == Path(str_path)
+
+    def test_constructor_rejects_non_path(self) -> None:
+        with pytest.raises(TypeError):
+            JournalDB(123)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# append()
+# ---------------------------------------------------------------------------
+class TestAppend:
+    def test_append_returns_entry_with_id(self, db: JournalDB) -> None:
+        result = db.append(_entry())
+        assert result.id is not None
+        assert result.id > 0
+
+    def test_ids_are_monotonically_increasing(self, db: JournalDB) -> None:
+        first = db.append(_entry(content="a"))
+        second = db.append(_entry(content="b"))
+        assert second.id is not None and first.id is not None
+        assert second.id > first.id
+
+    def test_append_rejects_entry_with_existing_id(self, db: JournalDB) -> None:
+        persisted = db.append(_entry())
+        with pytest.raises(ValueError, match="append-only"):
+            db.append(persisted)
+
+    def test_append_rejects_non_entry(self, db: JournalDB) -> None:
+        with pytest.raises(TypeError):
+            db.append("not an entry")  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# read()
+# ---------------------------------------------------------------------------
+class TestRead:
+    def test_read_empty_project_returns_empty_list(self, db: JournalDB) -> None:
+        assert db.read("nope") == []
+
+    def test_read_returns_newest_first(self, db: JournalDB) -> None:
+        base = datetime(2026, 5, 12, 8, 0, tzinfo=UTC)
+        for i in range(3):
+            db.append(
+                _entry(
+                    content=f"entry-{i}",
+                    timestamp=base + timedelta(minutes=i),
+                )
+            )
+        rows = db.read("bramble")
+        assert [r.content for r in rows] == ["entry-2", "entry-1", "entry-0"]
+
+    def test_read_respects_n(self, db: JournalDB) -> None:
+        base = datetime(2026, 5, 12, 8, 0, tzinfo=UTC)
+        for i in range(5):
+            db.append(
+                _entry(
+                    content=f"e{i}",
+                    timestamp=base + timedelta(minutes=i),
+                )
+            )
+        assert len(db.read("bramble", n=2)) == 2
+
+    def test_read_isolates_by_project(self, db: JournalDB) -> None:
+        db.append(_entry(project="bramble", content="b"))
+        db.append(_entry(project="elder-berry", content="e"))
+        assert [r.content for r in db.read("bramble")] == ["b"]
+        assert [r.content for r in db.read("elder-berry")] == ["e"]
+
+    def test_read_breaks_timestamp_ties_by_id(self, db: JournalDB) -> None:
+        same_ts = datetime(2026, 5, 12, 8, 0, tzinfo=UTC)
+        first = db.append(_entry(content="first", timestamp=same_ts))
+        second = db.append(_entry(content="second", timestamp=same_ts))
+        rows = db.read("bramble")
+        assert rows[0].id == second.id
+        assert rows[1].id == first.id
+
+    @pytest.mark.parametrize("bad_n", [0, -1])
+    def test_read_rejects_non_positive_n(self, db: JournalDB, bad_n: int) -> None:
+        with pytest.raises(ValueError):
+            db.read("bramble", n=bad_n)
+
+    def test_read_rejects_non_int_n(self, db: JournalDB) -> None:
+        with pytest.raises(TypeError):
+            db.read("bramble", n="10")  # type: ignore[arg-type]
+
+    def test_read_rejects_bool_n(self, db: JournalDB) -> None:
+        # bool is a subclass of int; the API should not silently
+        # accept ``True`` as ``1``.
+        with pytest.raises(TypeError):
+            db.read("bramble", n=True)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# search()
+# ---------------------------------------------------------------------------
+class TestSearch:
+    def test_search_finds_word_in_content(self, db: JournalDB) -> None:
+        db.append(_entry(content="we fixed a flaky test today"))
+        db.append(_entry(content="unrelated content"))
+        hits = db.search("bramble", "flaky")
+        assert len(hits) == 1
+        assert "flaky" in hits[0].content
+
+    def test_search_finds_word_in_title(self, db: JournalDB) -> None:
+        db.append(_entry(title="Deployment Notes", content="body without keyword"))
+        db.append(_entry(title="Other", content="other body"))
+        hits = db.search("bramble", "Deployment")
+        assert len(hits) == 1
+        assert hits[0].title == "Deployment Notes"
+
+    def test_search_respects_project_isolation(self, db: JournalDB) -> None:
+        db.append(_entry(project="bramble", content="needle here"))
+        db.append(_entry(project="elder-berry", content="needle here too"))
+        hits = db.search("bramble", "needle")
+        assert len(hits) == 1
+        assert hits[0].project == "bramble"
+
+    def test_search_respects_limit(self, db: JournalDB) -> None:
+        for i in range(5):
+            db.append(_entry(content=f"keyword variant {i}"))
+        assert len(db.search("bramble", "keyword", limit=2)) == 2
+
+    def test_search_returns_empty_on_bad_fts_syntax(self, db: JournalDB) -> None:
+        db.append(_entry(content="something"))
+        # Unbalanced quote is invalid FTS5 syntax.
+        assert db.search("bramble", '"open quote') == []
+
+    def test_search_returns_empty_when_no_match(self, db: JournalDB) -> None:
+        db.append(_entry(content="only this"))
+        assert db.search("bramble", "absent") == []
+
+    def test_search_rejects_empty_query(self, db: JournalDB) -> None:
+        with pytest.raises(ValueError):
+            db.search("bramble", "   ")
+
+    def test_search_reflects_delete_via_trigger(self, db: JournalDB) -> None:
+        # Bramble is append-only via API, but the delete trigger
+        # exists. Verify it keeps the FTS index in sync if a row is
+        # deleted directly.
+        persisted = db.append(_entry(content="ephemeral entry"))
+        import sqlite3
+
+        with sqlite3.connect(db.db_path) as conn:
+            conn.execute("DELETE FROM journal_entries WHERE id = ?", (persisted.id,))
+            conn.commit()
+        assert db.search("bramble", "ephemeral") == []
+
+
+# ---------------------------------------------------------------------------
+# list_projects()
+# ---------------------------------------------------------------------------
+class TestListProjects:
+    def test_returns_distinct_sorted(self, db: JournalDB) -> None:
+        db.append(_entry(project="elder-berry", content="e"))
+        db.append(_entry(project="bramble", content="b"))
+        db.append(_entry(project="bramble", content="b2"))
+        db.append(_entry(project="berry-gym", content="g"))
+        assert db.list_projects() == ["berry-gym", "bramble", "elder-berry"]
+
+    def test_empty_db(self, db: JournalDB) -> None:
+        assert db.list_projects() == []
+
+
+# ---------------------------------------------------------------------------
+# Round-trip
+# ---------------------------------------------------------------------------
+class TestRoundTrip:
+    def test_all_fields_survive_round_trip(self, db: JournalDB) -> None:
+        ts = datetime(2026, 5, 12, 9, 15, tzinfo=UTC)
+        original = _entry(
+            project="elder-berry",
+            content="full payload",
+            status=JournalStatus.ABGESCHLOSSEN,
+            phase="Phase 2",
+            title="Done",
+            timestamp=ts,
+        )
+        persisted = db.append(original)
+        [restored] = db.read("elder-berry")
+
+        assert restored.id == persisted.id
+        assert restored.project == "elder-berry"
+        assert restored.content == "full payload"
+        assert restored.status is JournalStatus.ABGESCHLOSSEN
+        assert restored.phase == "Phase 2"
+        assert restored.title == "Done"
+        assert restored.timestamp == ts

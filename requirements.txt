@@ -1,0 +1,3 @@
+# Bramble runtime requirements (Phase 1)
+# Phase 1: keine externen Runtime-Deps – nur Stdlib (sqlite3, dataclasses, datetime).
+# FastMCP wird in Phase 2 ergänzt.

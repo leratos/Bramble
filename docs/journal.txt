@@ -1,0 +1,98 @@
+# Bramble – Journal
+
+Solange Bramble selbst noch nicht läuft, wird dieses Journal klassisch
+als Textdatei gepflegt. Ab Phase 4 (DB läuft, Connector eingerichtet)
+wandert Brambles eigenes Journal in die zentrale Datenbank.
+
+Format: chronologisch, neueste Einträge unten. Statusangaben:
+in_arbeit | abgeschlossen | notiz | bugfix.
+
+---
+
+## In Arbeit: Phase 1 – Repo-Setup & Core
+Datum: 2026-05-12 (UTC)
+Branch: feature/phase-1-repo-setup-and-core
+
+Nächste Schritte:
+- Verzeichnisstruktur src/, tests/, docs/, scripts/ angelegt
+- pyproject.toml, requirements.txt, .gitignore, README.md
+- git init + Branch feature/phase-1-repo-setup-and-core
+- src/bramble/journal_entry.py (JournalEntry-Klasse)
+- src/bramble/journal_db.py (JournalDB-Klasse mit FTS5)
+- tests/test_journal_entry.py
+- tests/test_journal_db.py
+- scripts/init_db.py (Migration)
+- pytest-Lauf prüfen
+
+Designentscheidungen (im Vorgängerchat abgestimmt):
+- JournalEntry.id: int | None, von JournalDB.append() gefüllt
+- timestamp: datetime mit tzinfo=UTC (tz-naive wird abgelehnt)
+- status als StrEnum JournalStatus, akzeptiert Enum oder String beim Bau
+- FTS5: alle drei Trigger (INSERT/UPDATE/DELETE), defensiv,
+  obwohl Append-only der Default-Fall ist
+- FTS5 indiziert sowohl content als auch title (Suchbarkeit erhöhen)
+- Connection-Handling: pro Methode ein with sqlite3.connect(...)
+  (robust für sync und async, kein Pool nötig)
+- Kein git remote setzen – Repo legt der Nutzer selbst auf GitHub an
+- Keine LICENSE-Datei (privat, all rights reserved)
+- init_db.py prüft FTS5-Verfügbarkeit beim Start
+
+Offene TODOs (Reminder für spätere Phasen):
+- Phase 4: Brambles eigenes journal.txt nach dem Server-Start
+  in die DB importieren (nicht nur Elder-Berry).
+- Phase 2 entscheiden: ab wann führt Bramble sein Journal in der DB?
+
+## Abgeschlossen: Phase 1 – Repo-Setup & Core
+Datum: 2026-05-12 (UTC)
+
+Umgesetzt:
+- Repo-Struktur unter C:\Dev\Bramble\ angelegt
+- .venv mit Python 3.12.3 erstellt
+- pyproject.toml mit Editable-Install und pytest-Config
+- pytest 9.0.3 + pytest-asyncio 1.3.0 (asyncio_mode=auto) installiert
+- src/bramble/journal_entry.py:
+  - JournalStatus (StrEnum: in_arbeit / abgeschlossen / notiz / bugfix)
+  - JournalEntry (frozen dataclass, slots=True, vollständige Validierung)
+  - Helpers: timestamp_iso(), with_id(), from_row()
+- src/bramble/journal_db.py:
+  - JournalDB mit initialize(), append(), read(), search(), list_projects()
+  - Schema inkl. Index idx_project_ts und FTS5-Tabelle journal_fts
+    (content + title indiziert)
+  - Drei Trigger journal_entries_ai/au/ad halten FTS synchron
+  - Connection-Lifecycle per @contextmanager (kein Pool, je Aufruf
+    eigene Connection — sync- und async-tauglich)
+  - search() fängt sqlite3.OperationalError aus FTS5-Parserfehlern
+    und gibt [] zurück (statt zu crashen)
+- scripts/init_db.py: idempotente Migration mit FTS5-Pre-Check
+- tests/conftest.py: tmp_path-basierte db_path- und db-Fixtures
+- tests/test_journal_entry.py: 26 Tests
+- tests/test_journal_db.py: 28 Tests
+  inkl. Trigger-Sync, Projekt-Isolation, FTS-Match in title,
+  Tie-Break per id, defekte FTS-Queries → []
+
+Tests: 54/54 passed in 1.33 s
+SQLite-Version im venv: 3.45.1, FTS5 verfügbar.
+
+Bewusst NICHT in Phase 1 enthalten (Folgephasen):
+- MCP-Server (Phase 2): FastMCP-Bindings, Tool-Definitionen
+- Async-Variante (Phase 2 optional): Tausch sqlite3 -> aiosqlite
+- Auth, Rate-Limit, Logging, Deployment (Phase 3)
+
+Bekannte technische Schulden / offene Punkte:
+- list_projects() liefert nur Namen, keine Eintrags-Counts oder
+  letzten Timestamp. Für die geplante MCP-Tool-Variante in Phase 2
+  müssen wir entscheiden, ob das ausreicht oder mehr Metadaten gebraucht
+  werden.
+- search() verwendet rohe FTS5-Syntax. Wenn Bramble von außen
+  (Claude.ai-Connector, Phase 4) erreichbar ist, sollten wir prüfen,
+  ob wir Queries mit Anführungszeichen vorab quoten, um Power-User-
+  Operatoren bewusst zu erlauben/zu verbieten.
+- Keine WAL-Mode-Aktivierung. Solange Bramble nur ein einzelner
+  Prozess ist, irrelevant. Phase 3 (parallele Requests gegen den
+  systemd-Service) müssen wir das nochmal evaluieren.
+- Es gibt keine Migrations-Versionierung (alembic/yoyo). Schema ist
+  per CREATE TABLE IF NOT EXISTS idempotent, aber Spalten-Änderungen
+  später erfordern ein eigenes Migrations-Konzept.
+
+Branch ist commitet, aber NICHT gepusht (Repo auf GitHub legt
+der Nutzer selbst an, dann manuell remote add + push).
