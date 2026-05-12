@@ -30,6 +30,9 @@ dev = [
     "pytest-asyncio>=0.23",
 ]
 
+[project.scripts]
+bramble-server = "bramble.__main__:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
