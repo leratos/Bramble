@@ -194,7 +194,26 @@ class JournalMCPServer:
             persisted = await asyncio.to_thread(db.append, entry)
             return _entry_to_dict(persisted)
 
-        # Etappe 4c: journal_search
+        @app.tool
+        @translate_errors
+        async def journal_search(
+            project: str,
+            query: str,
+            limit: int = 20,
+        ) -> list[dict[str, Any]]:
+            """Full-text-search ``project``'s entries for ``query``.
+
+            Pass SQLite FTS5 MATCH syntax directly: bare words for AND,
+            ``OR`` for alternation, double-quoted strings for phrase
+            search, and ``NEAR()`` for proximity. Malformed FTS5
+            syntax returns an empty list (not an error) to match the
+            Phase-1 ``JournalDB.search`` behaviour.
+            """
+
+            _require_kebab_case(project)
+            entries = await asyncio.to_thread(db.search, project, query, limit)
+            return [_entry_to_dict(e) for e in entries]
+
         # Etappe 4d: journal_list_projects
 
     # ------------------------------------------------------------------

@@ -122,7 +122,7 @@ class TestToolRegistry:
         async with Client(server.app) as client:
             tools = await client.list_tools()
         names = sorted(t.name for t in tools)
-        assert names == ["journal_append", "journal_read"]
+        assert names == ["journal_append", "journal_read", "journal_search"]
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +289,92 @@ class TestJournalAppend:
                 await client.call_tool(
                     "journal_append",
                     {"project": "Bad", "status": "notiz", "content": "x"},
+                )
+
+
+# ---------------------------------------------------------------------------
+# journal_search
+# ---------------------------------------------------------------------------
+class TestJournalSearch:
+    async def test_happy_path_finds_word_in_content(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="we fixed a flaky test today",
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="unrelated content",
+            )
+        )
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_search", {"project": "bramble", "query": "flaky"}
+            )
+        assert len(result.data) == 1
+        assert "flaky" in result.data[0]["content"]
+
+    async def test_respects_limit(self, server: JournalMCPServer, db: JournalDB) -> None:
+        for i in range(5):
+            db.append(
+                JournalEntry(
+                    project="bramble",
+                    status=JournalStatus.NOTIZ,
+                    content=f"keyword variant {i}",
+                )
+            )
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_search",
+                {"project": "bramble", "query": "keyword", "limit": 2},
+            )
+        assert len(result.data) == 2
+
+    async def test_malformed_fts5_returns_empty_list(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        db.append(
+            JournalEntry(
+                project="bramble", status=JournalStatus.NOTIZ, content="something"
+            )
+        )
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_search",
+                {"project": "bramble", "query": '"open quote'},
+            )
+        assert result.data == []
+
+    async def test_rejects_empty_query(self, server: JournalMCPServer) -> None:
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="query"):
+                await client.call_tool(
+                    "journal_search", {"project": "bramble", "query": "   "}
+                )
+
+    async def test_rejects_non_kebab_case_project(
+        self, server: JournalMCPServer
+    ) -> None:
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="kebab-case"):
+                await client.call_tool(
+                    "journal_search", {"project": "Bad", "query": "x"}
+                )
+
+    async def test_rejects_non_positive_limit(
+        self, server: JournalMCPServer
+    ) -> None:
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="positive"):
+                await client.call_tool(
+                    "journal_search",
+                    {"project": "bramble", "query": "x", "limit": 0},
                 )
 
 
