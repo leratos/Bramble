@@ -210,3 +210,46 @@ Geplante Commits:
 8. journal.txt: Cleanup-Abschluss
 
 Tests nach Punkt 4 und 5, dann am Ende noch mal komplett.
+
+## Abgeschlossen: Phase-2-Cleanup
+Datum: 2026-05-12 (UTC)
+Branch: chore/phase-2-cleanup
+
+Umgesetzt (sieben Commits):
+- af195ca smoke_http.py + bisheriger Journal-Backfill reingeholt
+- e3fb277 __init__.py: Docstring + Exports auf Phase-2-Stand
+          (JournalEntry, JournalStatus, JournalDB, ProjectSummary,
+           ServerConfig, JournalMCPServer alle exportiert)
+- 2fb02da journal_db.py Modul-Docstring: aiosqlite-Hinweis raus,
+          stattdessen Verweis auf asyncio.to_thread im MCP-Layer
+- 921ebd4 list_projects() entfernt (API-Break, vom MCP-Server
+          nicht genutzt; project_overview() ist der Ersatz),
+          TestListProjects ebenfalls weg
+- 1eff9ee scripts/init_db.py liest BRAMBLE_DB_PATH aus der Env,
+          Prioritaet CLI > Env > Default, ENV_DB_PATH wird aus
+          bramble.server_config importiert (Single Source of Truth)
+- 638aad3 README.md auf Phase-2-Stand: Status, CLI-Beispiele,
+          Env-Var-Tabelle, smoke_http.py-Abschnitt
+- d704d65 docs/concepts/phase-2-mcp-server.md: Status auf
+          "Abgeschlossen" mit Verweis auf den Cleanup-Branch
+
+Verifikation:
+- pytest: 152 passed (Phase 1: 54, Phase 2: 100 nach Loeschung
+  der zwei TestListProjects-Faelle, davor 154)
+- Smoke-Test: alle acht Checks gruen
+  (Tool-Discovery, Append x3, Read, FTS5-Search, Projekt-Isolation,
+   list_projects, zwei Negativtests)
+- init_db.py manuell verifiziert: default, env, cli-overrides-env
+  alle drei Pfade funktionieren
+
+Tooling-Anmerkung (nicht im Code):
+- Beim zweiten Smoke-Lauf in dieser Session hat das Tool-Setup
+  fuer Hintergrund-Prozesse zickig getan; Start-Process mit
+  -RedirectStandardError und -WindowStyle Hidden hat es dann
+  doch sauber gemacht. Fuer Phase 3 (systemd) ist das ohnehin
+  obsolet, aber falls jemand auf Windows langfristig testet:
+  bramble-server in eigenem Konsolen-Fenster starten, nicht im
+  Hintergrund-Job.
+
+Branch ist NICHT gepusht. Naechster Schritt: chore/phase-2-cleanup
+auf GitHub pushen, PR aufmachen, mergen, dann Phase 3 starten.
