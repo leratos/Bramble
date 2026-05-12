@@ -96,3 +96,117 @@ Bekannte technische Schulden / offene Punkte:
 
 Branch ist commitet, aber NICHT gepusht (Repo auf GitHub legt
 der Nutzer selbst an, dann manuell remote add + push).
+
+## Abgeschlossen: Phase 2 – FastMCP-Server lokal lauffähig
+Datum: 2026-05-12 (UTC)
+Branch: feature/phase-2-mcp-server (Phase-2-Commits bereits gemacht)
+Nachtrag: Eintrag wurde erst beim Übergang zu Phase 3 ergänzt; der
+laufende Status während Phase 2 wurde nicht ins Journal geschrieben.
+
+Umgesetzt (aus dem Code rekonstruiert):
+- src/bramble/journal_mcp_server.py:
+  - JournalMCPServer mit FastMCP("bramble")
+  - vier Tools registriert: journal_read, journal_append,
+    journal_search, journal_list_projects
+  - kebab-case-Validierung (^[a-z0-9][a-z0-9-]*$) im MCP-Layer,
+    JournalDB bleibt projekt-agnostisch
+  - Konstruktor-Slots auth_validator und rate_limiter sind als
+    optionale Keyword-Args vorbereitet (Phase-3-Hooks, aktuell
+    nicht konsumiert)
+  - run(transport, host, port) für stdio und http
+- src/bramble/server_config.py:
+  - ServerConfig (frozen dataclass) mit db_path, transport, host,
+    port, log_level
+  - from_sources() löst CLI > Env > Default auf
+    (BRAMBLE_DB_PATH / BRAMBLE_TRANSPORT / BRAMBLE_HOST /
+     BRAMBLE_PORT / BRAMBLE_LOG_LEVEL)
+- src/bramble/project_summary.py:
+  - ProjectSummary (frozen dataclass) mit name, entry_count,
+    last_timestamp; tz-aware UTC erzwungen
+- src/bramble/mcp_errors.py:
+  - translate_errors-Decorator: ValueError/TypeError -> ToolError,
+    sonst RuntimeError mit Stack im Log
+- src/bramble/logging_setup.py:
+  - configure_logging mit python-json-logger (JSON auf stderr)
+- src/bramble/journal_db.py:
+  - neue Methode project_overview() -> list[ProjectSummary]
+    (alte list_projects() bleibt)
+- src/bramble/__main__.py:
+  - CLI-Entry-Point, verdrahtet ServerConfig + JournalDB + Server
+- pyproject.toml:
+  - dependencies: fastmcp>=3,<4, python-json-logger>=4,<5
+  - console_scripts: bramble-server = bramble.__main__:main
+
+Designentscheidungen (Phase 2):
+- Transport: beides (stdio + http) als Flag, Default stdio
+- DB bleibt sync, Tools wrappen in asyncio.to_thread (kein aiosqlite)
+- Timestamp wird serverseitig gesetzt, Client kann nicht überschreiben
+- FTS5-Query roh durchgereicht (Power-User-Operatoren erlaubt),
+  fehlerhafte Syntax -> [] wie in Phase 1
+- kebab-case-Enforcement nur im MCP-Layer, nicht in JournalDB
+
+Tests: 154 passed in 7.02 s (Phase 1: 54, Phase 2: +100)
+FastMCP-Version installiert: 3.2.4
+SQLite/FTS5 unverändert: 3.45.1
+
+## In Arbeit: Übergang Phase 2 -> Phase 3 (Smoke-Test lokal)
+Datum: 2026-05-12 (UTC)
+Branch: feature/phase-2-mcp-server (kein eigener Branch, Hilfsskript)
+
+Hinzugefügt:
+- scripts/smoke_http.py: manuelles End-to-End-Smoke-Skript fuer
+  den HTTP-Transport. Nicht im pytest-Suite, sondern ausdruecklich
+  fuer manuelles Testen gegen einen real laufenden Server.
+  Wirft am Anfang einen Connection-Check, prueft Tool-Discovery,
+  schreibt drei Eintraege (zwei in bramble, einen in elder-berry),
+  liest zurueck, sucht per FTS5, prueft Projekt-Isolation und
+  feuert zwei Negativtests (unbekannter status, non-kebab project).
+
+Hinweis Encoding:
+- Erste Version nutzte Unicode-Pfeile / Haken; cp1252 (Windows-
+  Default-Konsole) ist daran gescheitert. Skript jetzt ASCII-only
+  ("-> ", "[OK]", "[FAIL]"), laeuft damit auf Windows und Linux
+  ohne PYTHONIOENCODING-Tricks.
+
+Smoke-Test-Lauf:
+- Server: bramble-server.exe --transport http --host 127.0.0.1
+  --port 8765 --log-level INFO (Hintergrund)
+- Skript: python scripts/smoke_http.py
+- Ergebnis: alle Checks gruen, inkl. Negativ-Pfade
+- data/ wurde nach dem Lauf wieder geleert (Smoke-Eintraege
+  raus, frischer Zustand fuer den Nutzer)
+
+Offen / Reminder fuer Phase 3:
+- Phase 2 wurde im Journal nicht laufend dokumentiert. Vor
+  Phase-3-Beginn sollte das System-Prompt-Verhalten geprueft
+  werden: warum hat der Phase-2-Chat das journal.txt nicht
+  geschrieben? Entweder System-Prompt nachschaerfen oder
+  expliziter Schritt in den Phase-Start-Prompt.
+- Smoke-Test ist NUR fuer HTTP. stdio bleibt ueber pytest +
+  FastMCP-In-Process-Client abgedeckt; falls Phase 4 mit Claude
+  Desktop ansteht, dort manuell verifizieren.
+
+## In Arbeit: Phase-2-Cleanup
+Datum: 2026-05-12 (UTC)
+Branch: chore/phase-2-cleanup
+
+Ziel: Doku/Code-Drift zwischen Phase-2-Stand und Repo aufraeumen,
+bevor Phase 3 startet. Bewusst kein neuer Feature-Code.
+
+Nutzer-Entscheidungen:
+- list_projects() wird geloescht (API-Break, niemand nutzt sie
+  ausserhalb von Bramble; project_overview() ist der Ersatz).
+- __init__.py exportiert ab jetzt alles (Datenklassen + Server +
+  Config); Bramble ist ein Tool-Paket, kein Lib-Paket.
+
+Geplante Commits:
+1. Reste reinholen: smoke_http.py + bisheriges journal.txt
+2. __init__.py: Docstring + Exports auf Phase-2-Stand
+3. journal_db.py: veralteten aiosqlite-Hinweis raus
+4. journal_db.py + tests: list_projects() loeschen
+5. scripts/init_db.py: BRAMBLE_DB_PATH aus Env lesen
+6. README.md: Phase-2-Stand, CLI, Env-Vars, smoke_http
+7. docs/concepts/phase-2-mcp-server.md: Status auf Abgeschlossen
+8. journal.txt: Cleanup-Abschluss
+
+Tests nach Punkt 4 und 5, dann am Ende noch mal komplett.
