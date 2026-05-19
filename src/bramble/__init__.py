@@ -32,9 +32,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from bramble.auth_validator import AuthValidator
 from bramble.journal_db import JournalDB
 from bramble.journal_entry import JournalEntry, JournalStatus
 from bramble.project_summary import ProjectSummary
+from bramble.rate_limiter import RateLimiter
 from bramble.server_config import ServerConfig
 
 if TYPE_CHECKING:
@@ -43,11 +45,13 @@ if TYPE_CHECKING:
     from bramble.journal_mcp_server import JournalMCPServer
 
 __all__ = [
+    "AuthValidator",
     "JournalDB",
     "JournalEntry",
     "JournalMCPServer",
     "JournalStatus",
     "ProjectSummary",
+    "RateLimiter",
     "ServerConfig",
 ]
 __version__ = "0.1.0"

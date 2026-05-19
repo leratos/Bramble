@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -55,6 +56,21 @@ class TestJournalDBInit:
     def test_constructor_rejects_non_path(self) -> None:
         with pytest.raises(TypeError):
             JournalDB(123)  # type: ignore[arg-type]
+
+    def test_initialize_enables_wal_mode(self, db_path: Path) -> None:
+        JournalDB(db_path).initialize()
+        # WAL is persisted in the file header, so a fresh connection
+        # sees it (Phase-3 Decision I).
+        with sqlite3.connect(db_path) as conn:
+            mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        assert str(mode).lower() == "wal"
+
+    def test_initialize_wal_survives_reinitialise(self, db_path: Path) -> None:
+        JournalDB(db_path).initialize()
+        JournalDB(db_path).initialize()  # idempotent, still WAL
+        with sqlite3.connect(db_path) as conn:
+            mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        assert str(mode).lower() == "wal"
 
 
 # ---------------------------------------------------------------------------

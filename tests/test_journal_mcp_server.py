@@ -4,23 +4,47 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from fastmcp import Client, FastMCP
 from fastmcp.exceptions import ToolError
 
+from bramble.auth_validator import AuthValidator
 from bramble.journal_db import JournalDB
 from bramble.journal_entry import JournalEntry, JournalStatus
 from bramble.journal_mcp_server import (
     JournalMCPServer,
+    _AuthRateLimitMiddleware,
+    _bearer_token,
+    _enforce_project_scope,
     _entry_to_dict,
     _require_kebab_case,
+    _resolve_client_ip,
+    _token_project,
 )
+from bramble.rate_limiter import RateLimiter
 
 
 @pytest.fixture()
 def server(db: JournalDB) -> Iterator[JournalMCPServer]:
     yield JournalMCPServer(db)
+
+
+@pytest.fixture()
+def auth_validator(tmp_path: Path) -> AuthValidator:
+    """An AuthValidator backed by a two-project token file."""
+
+    path = tmp_path / "tokens.json"
+    path.write_text(
+        '{"bramble": "tok-bramble", "elder-berry": "tok-elder"}', encoding="utf-8"
+    )
+    return AuthValidator(path)
+
+
+@pytest.fixture()
+def rate_limiter() -> RateLimiter:
+    return RateLimiter(per_token_rpm=60, per_ip_rpm=120)
 
 
 # ---------------------------------------------------------------------------
@@ -38,23 +62,29 @@ class TestConstruction:
     def test_app_property_returns_fastmcp_instance(self, server: JournalMCPServer) -> None:
         assert isinstance(server.app, FastMCP)
 
-    def test_phase_3_hooks_default_to_none(self, db: JournalDB) -> None:
+    def test_hooks_default_to_none(self, db: JournalDB) -> None:
         srv = JournalMCPServer(db)
-        # We access private attrs deliberately – this test is the
-        # contract that the slots exist and start as None for Phase 3.
+        # Accessing private attrs deliberately: the contract is that a
+        # stdio server runs without an auth/rate-limit gate.
         assert srv._auth_validator is None
         assert srv._rate_limiter is None
 
-    def test_phase_3_hooks_accept_arbitrary_objects(self, db: JournalDB) -> None:
-        sentinel_auth = object()
-        sentinel_rl = object()
+    def test_hooks_are_stored_when_provided(
+        self, db: JournalDB, auth_validator: AuthValidator, rate_limiter: RateLimiter
+    ) -> None:
         srv = JournalMCPServer(
-            db,
-            auth_validator=sentinel_auth,
-            rate_limiter=sentinel_rl,
+            db, auth_validator=auth_validator, rate_limiter=rate_limiter
         )
-        assert srv._auth_validator is sentinel_auth
-        assert srv._rate_limiter is sentinel_rl
+        assert srv._auth_validator is auth_validator
+        assert srv._rate_limiter is rate_limiter
+
+    def test_requires_both_hooks_or_neither(
+        self, db: JournalDB, auth_validator: AuthValidator, rate_limiter: RateLimiter
+    ) -> None:
+        with pytest.raises(ValueError, match="together"):
+            JournalMCPServer(db, auth_validator=auth_validator)
+        with pytest.raises(ValueError, match="together"):
+            JournalMCPServer(db, rate_limiter=rate_limiter)
 
 
 # ---------------------------------------------------------------------------
@@ -451,3 +481,208 @@ class TestRunPreValidation:
     def test_http_without_port_raises(self, server: JournalMCPServer) -> None:
         with pytest.raises(ValueError, match="host and port"):
             server.run(transport="http", host="127.0.0.1", port=None)
+
+
+# ---------------------------------------------------------------------------
+# Phase-3 auth: bearer-token parsing
+# ---------------------------------------------------------------------------
+class TestBearerToken:
+    @pytest.mark.parametrize(
+        "header,expected",
+        [
+            ("Bearer abc123", "abc123"),
+            ("bearer abc123", "abc123"),  # scheme is case-insensitive
+            ("BEARER abc123", "abc123"),
+            ("Bearer   spaced", "spaced"),  # extra whitespace stripped
+            (None, None),
+            ("", None),
+            ("abc123", None),  # no scheme
+            ("Basic abc123", None),  # wrong scheme
+            ("Bearer ", None),  # empty token
+            ("Bearer", None),  # scheme only
+        ],
+    )
+    def test_parses_header(self, header: str | None, expected: str | None) -> None:
+        assert _bearer_token(header) == expected
+
+
+# ---------------------------------------------------------------------------
+# Phase-3 auth: client-IP resolution (X-Forwarded-For mitigation)
+# ---------------------------------------------------------------------------
+class _FakeClient:
+    def __init__(self, host: str) -> None:
+        self.host = host
+
+
+class _FakeRequest:
+    """Minimal stand-in for a Starlette request: peer + headers."""
+
+    def __init__(self, peer: str | None, headers: dict[str, str] | None = None) -> None:
+        self.client = _FakeClient(peer) if peer is not None else None
+        self.headers = headers or {}
+
+
+class TestResolveClientIp:
+    def test_uses_peer_when_no_forwarded_header(self) -> None:
+        request = _FakeRequest("198.51.100.5")
+        assert _resolve_client_ip(request) == "198.51.100.5"
+
+    def test_trusts_forwarded_header_from_loopback(self) -> None:
+        request = _FakeRequest("127.0.0.1", {"x-forwarded-for": "203.0.113.9"})
+        assert _resolve_client_ip(request) == "203.0.113.9"
+
+    def test_takes_leftmost_forwarded_entry(self) -> None:
+        request = _FakeRequest(
+            "127.0.0.1", {"x-forwarded-for": "203.0.113.9, 10.0.0.1"}
+        )
+        assert _resolve_client_ip(request) == "203.0.113.9"
+
+    def test_ignores_forwarded_header_from_untrusted_peer(self) -> None:
+        # Spoofing mitigation: a non-loopback peer cannot forge its IP.
+        request = _FakeRequest(
+            "198.51.100.5", {"x-forwarded-for": "203.0.113.9"}
+        )
+        assert _resolve_client_ip(request) == "198.51.100.5"
+
+    def test_falls_back_to_peer_when_forwarded_is_blank(self) -> None:
+        request = _FakeRequest("127.0.0.1", {"x-forwarded-for": "   "})
+        assert _resolve_client_ip(request) == "127.0.0.1"
+
+    def test_handles_missing_client(self) -> None:
+        assert _resolve_client_ip(_FakeRequest(None)) == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Phase-3 auth: the middleware authorisation decision
+# ---------------------------------------------------------------------------
+class TestAuthorize:
+    def test_valid_token_returns_project(
+        self, auth_validator: AuthValidator, rate_limiter: RateLimiter
+    ) -> None:
+        middleware = _AuthRateLimitMiddleware(auth_validator, rate_limiter)
+        assert (
+            middleware._authorize(token="tok-bramble", client_ip="1.2.3.4")
+            == "bramble"
+        )
+
+    def test_missing_token_raises(
+        self, auth_validator: AuthValidator, rate_limiter: RateLimiter
+    ) -> None:
+        middleware = _AuthRateLimitMiddleware(auth_validator, rate_limiter)
+        with pytest.raises(ToolError, match="authentication"):
+            middleware._authorize(token=None, client_ip="1.2.3.4")
+
+    def test_invalid_token_raises(
+        self, auth_validator: AuthValidator, rate_limiter: RateLimiter
+    ) -> None:
+        middleware = _AuthRateLimitMiddleware(auth_validator, rate_limiter)
+        with pytest.raises(ToolError, match="authentication"):
+            middleware._authorize(token="not-a-real-token", client_ip="1.2.3.4")
+
+    def test_exhausted_ip_budget_raises(self, auth_validator: AuthValidator) -> None:
+        # per_ip_rpm=1: the second request from the same IP is refused
+        # before the token is even looked at.
+        limiter = RateLimiter(per_token_rpm=99, per_ip_rpm=1)
+        middleware = _AuthRateLimitMiddleware(auth_validator, limiter)
+        middleware._authorize(token="tok-bramble", client_ip="1.2.3.4")
+        with pytest.raises(ToolError, match="rate limit"):
+            middleware._authorize(token="tok-bramble", client_ip="1.2.3.4")
+
+    def test_exhausted_token_budget_raises(
+        self, auth_validator: AuthValidator
+    ) -> None:
+        # per_token_rpm=1: the IP still has budget, the project does not.
+        limiter = RateLimiter(per_token_rpm=1, per_ip_rpm=99)
+        middleware = _AuthRateLimitMiddleware(auth_validator, limiter)
+        middleware._authorize(token="tok-bramble", client_ip="1.2.3.4")
+        with pytest.raises(ToolError, match="rate limit"):
+            middleware._authorize(token="tok-bramble", client_ip="1.2.3.4")
+
+
+# ---------------------------------------------------------------------------
+# Phase-3 Decision B: journal_append write-scope binding
+# ---------------------------------------------------------------------------
+class TestProjectScope:
+    def test_no_binding_when_context_unset(self) -> None:
+        # stdio / no-auth: any project may be written.
+        _enforce_project_scope("bramble")  # must not raise
+
+    def test_allows_matching_project(self) -> None:
+        reset = _token_project.set("bramble")
+        try:
+            _enforce_project_scope("bramble")  # must not raise
+        finally:
+            _token_project.reset(reset)
+
+    def test_rejects_mismatching_project(self) -> None:
+        reset = _token_project.set("elder-berry")
+        try:
+            with pytest.raises(ValueError, match="scoped to project"):
+                _enforce_project_scope("bramble")
+        finally:
+            _token_project.reset(reset)
+
+    async def test_append_rejected_for_foreign_project(
+        self, server: JournalMCPServer
+    ) -> None:
+        reset = _token_project.set("elder-berry")
+        try:
+            async with Client(server.app) as client:
+                with pytest.raises(ToolError, match="scoped to project"):
+                    await client.call_tool(
+                        "journal_append",
+                        {
+                            "project": "bramble",
+                            "status": "notiz",
+                            "content": "should be blocked",
+                        },
+                    )
+        finally:
+            _token_project.reset(reset)
+
+    async def test_append_allowed_for_own_project(
+        self, server: JournalMCPServer
+    ) -> None:
+        reset = _token_project.set("bramble")
+        try:
+            async with Client(server.app) as client:
+                result = await client.call_tool(
+                    "journal_append",
+                    {
+                        "project": "bramble",
+                        "status": "notiz",
+                        "content": "own-project write",
+                    },
+                )
+        finally:
+            _token_project.reset(reset)
+        assert result.data["project"] == "bramble"
+
+
+# ---------------------------------------------------------------------------
+# Phase-3 auth: the wired-up server
+# ---------------------------------------------------------------------------
+class TestAuthenticatedServer:
+    async def test_blocks_calls_without_a_token(
+        self,
+        db: JournalDB,
+        auth_validator: AuthValidator,
+        rate_limiter: RateLimiter,
+    ) -> None:
+        # A server built with the hooks gates every tool call. The
+        # in-process client carries no HTTP request, so it has no
+        # token and is refused – proof the middleware is wired in.
+        srv = JournalMCPServer(
+            db, auth_validator=auth_validator, rate_limiter=rate_limiter
+        )
+        async with Client(srv.app) as client:
+            with pytest.raises(ToolError, match="authentication"):
+                await client.call_tool("journal_read", {"project": "bramble"})
+
+    async def test_unauthenticated_server_runs_without_a_gate(
+        self, server: JournalMCPServer
+    ) -> None:
+        # No hooks (stdio): tool calls work without any token.
+        async with Client(server.app) as client:
+            result = await client.call_tool("journal_list_projects", {})
+        assert result.data == []

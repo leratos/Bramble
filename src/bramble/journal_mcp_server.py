@@ -7,30 +7,51 @@ needs, ``db`` is the thing tools talk to. Tests construct the server
 with an in-memory or temp-file ``JournalDB`` and connect via the
 FastMCP in-process ``Client``.
 
-Phase-3 hook points (``auth_validator``, ``rate_limiter``) are kept as
-optional keyword arguments in the constructor. They are accepted but
-not yet consumed; Phase 3 will wire them into the request path without
-having to change call sites.
+The ``auth_validator`` and ``rate_limiter`` constructor arguments are
+consumed by :class:`_AuthRateLimitMiddleware`, which FastMCP runs
+before every tool call. They are supplied together for the
+authenticated ``http`` transport and left unset for local ``stdio``
+use, where no token gate applies.
 
 Tool registration happens once in :meth:`__init__` via
 :meth:`_register_tools`, which is the file's central index of which
-MCP tools exist. Tools themselves come in Etappen 4a–4d.
+MCP tools exist.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import re
 from typing import Any
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
+from fastmcp.server.dependencies import get_http_headers, get_http_request
+from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 
+from bramble.auth_validator import AuthValidator
 from bramble.journal_db import JournalDB
 from bramble.journal_entry import JournalEntry, JournalStatus
 from bramble.mcp_errors import translate_errors
+from bramble.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
+
+# Set by :class:`_AuthRateLimitMiddleware` to the project a request's
+# bearer token belongs to, so ``journal_append`` can enforce the
+# write-scope binding (Phase-3 Decision B). It stays ``None`` for the
+# stdio transport and for any server built without an auth validator,
+# which is exactly when no scope binding should apply.
+_token_project: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "bramble_token_project", default=None
+)
+
+# Peers from which an ``X-Forwarded-For`` header may be trusted. Plesk's
+# Nginx terminates TLS on the same host and proxies to loopback, so a
+# loopback peer is our own proxy. Any other peer could forge the header.
+_TRUSTED_PROXY_HOSTS: frozenset[str] = frozenset({"127.0.0.1", "::1"})
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +92,129 @@ def _entry_to_dict(entry: JournalEntry) -> dict[str, Any]:
     }
 
 
+def _enforce_project_scope(project: str) -> None:
+    """Reject a write whose project does not match the bearer token.
+
+    :class:`_AuthRateLimitMiddleware` stashes the token's project in
+    :data:`_token_project` before the tool runs. When that is unset –
+    stdio transport, or a server built without an auth validator – no
+    binding applies and any project may be written (Decision B).
+    """
+
+    token_project = _token_project.get()
+    if token_project is not None and project != token_project:
+        raise ValueError(
+            f"token is scoped to project {token_project!r}; "
+            f"it cannot append to {project!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Request-credential extraction (Phase-3 auth)
+# ---------------------------------------------------------------------------
+def _bearer_token(authorization: str | None) -> str | None:
+    """Extract the token from an ``Authorization: Bearer <token>`` header.
+
+    Returns ``None`` for a missing header, a non-Bearer scheme, or an
+    empty token – every one of which is an authentication failure.
+    """
+
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    return token.strip() or None
+
+
+def _resolve_client_ip(request: Any) -> str:
+    """Return the real client IP for ``request``.
+
+    ``X-Forwarded-For`` is trusted only when the immediate peer is a
+    local proxy (:data:`_TRUSTED_PROXY_HOSTS`); a request from any
+    other peer uses its peer address verbatim. This is the
+    ``X-Forwarded-For`` spoofing mitigation from the Phase-3 risk list:
+    without it an attacker could forge the header and dodge Fail2Ban.
+    """
+
+    peer = request.client.host if request.client else "unknown"
+    if peer in _TRUSTED_PROXY_HOSTS:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            # Plesk-Nginx appends, so the left-most entry is the
+            # originating client.
+            original = forwarded.split(",")[0].strip()
+            if original:
+                return original
+    return peer
+
+
+def _extract_credentials() -> tuple[str | None, str]:
+    """Pull the bearer token and client IP out of the current request.
+
+    The middleware is mounted only for the ``http`` transport, so an
+    HTTP request is normally present. If it is missing the request
+    cannot be authenticated, so this returns no token and the caller
+    fails closed.
+    """
+
+    try:
+        request = get_http_request()
+    except RuntimeError:
+        return None, "unknown"
+    headers = get_http_headers(include={"authorization"})
+    return _bearer_token(headers.get("authorization")), _resolve_client_ip(request)
+
+
+class _AuthRateLimitMiddleware(Middleware):
+    """FastMCP middleware enforcing bearer-token auth and rate limits.
+
+    Runs before every tool call on the ``http`` transport. This class
+    is only the wiring that bridges FastMCP's hook to Bramble's own
+    :class:`~bramble.auth_validator.AuthValidator` and
+    :class:`~bramble.rate_limiter.RateLimiter`; the auth and
+    rate-limit logic itself lives in those two classes.
+    """
+
+    def __init__(
+        self, auth_validator: AuthValidator, rate_limiter: RateLimiter
+    ) -> None:
+        self._auth_validator = auth_validator
+        self._rate_limiter = rate_limiter
+
+    async def on_call_tool(
+        self, context: MiddlewareContext, call_next: CallNext
+    ) -> Any:
+        token, client_ip = _extract_credentials()
+        project = self._authorize(token=token, client_ip=client_ip)
+        # Hand the resolved project to journal_append's scope check.
+        reset = _token_project.set(project)
+        try:
+            return await call_next(context)
+        finally:
+            _token_project.reset(reset)
+
+    def _authorize(self, *, token: str | None, client_ip: str) -> str:
+        """Decide a single request: return the token's project or raise.
+
+        Kept free of FastMCP types – it takes the already-extracted
+        token and client IP – so it is unit-testable in-process. The
+        order matters: the per-IP limit is a backstop that applies
+        before the token is known, then auth, then the per-token limit.
+        """
+
+        if not self._rate_limiter.allow_ip(client_ip):
+            raise ToolError("rate limit exceeded; slow down")
+        project = self._auth_validator.authenticate(token, client_ip=client_ip)
+        if project is None:
+            raise ToolError(
+                "authentication required: missing or invalid bearer token"
+            )
+        if not self._rate_limiter.allow_project(project):
+            raise ToolError("rate limit exceeded; slow down")
+        return project
+
+
 class JournalMCPServer:
     """MCP-facing server that exposes :class:`JournalDB` operations.
 
@@ -80,21 +224,27 @@ class JournalMCPServer:
         The :class:`JournalDB` instance to read from / write to. Must
         already be initialised (``db.initialize()`` was called).
     auth_validator:
-        Phase-3 hook. Currently unused; reserved so Phase-3 wiring
-        does not require a constructor signature change.
+        Resolves bearer tokens to projects. Supply together with
+        ``rate_limiter`` to gate the ``http`` transport; leave unset
+        for ``stdio``. Providing only one of the two raises.
     rate_limiter:
-        Phase-3 hook. Same rationale as ``auth_validator``.
+        Token-bucket request limiter. See ``auth_validator``.
     """
 
     def __init__(
         self,
         db: JournalDB,
         *,
-        auth_validator: Any = None,
-        rate_limiter: Any = None,
+        auth_validator: AuthValidator | None = None,
+        rate_limiter: RateLimiter | None = None,
     ) -> None:
         if not isinstance(db, JournalDB):
             raise TypeError("db must be a JournalDB instance")
+        if (auth_validator is None) != (rate_limiter is None):
+            raise ValueError(
+                "auth_validator and rate_limiter must be provided together: "
+                "both for the authenticated http transport, or neither"
+            )
 
         self._db = db
         self._auth_validator = auth_validator
@@ -110,6 +260,10 @@ class JournalMCPServer:
             ),
         )
         self._register_tools()
+        if auth_validator is not None and rate_limiter is not None:
+            self._app.add_middleware(
+                _AuthRateLimitMiddleware(auth_validator, rate_limiter)
+            )
 
     # ------------------------------------------------------------------
     # Public accessors
@@ -173,9 +327,14 @@ class JournalMCPServer:
             ``status`` must be one of: ``in_arbeit``, ``abgeschlossen``,
             ``notiz``, ``bugfix``. The timestamp is set server-side
             (``datetime.now(UTC)``); clients cannot override it.
+
+            On the authenticated ``http`` transport the bearer token is
+            bound to one project: appending to a different project is
+            rejected (Phase-3 Decision B).
             """
 
             _require_kebab_case(project)
+            _enforce_project_scope(project)
             allowed = ", ".join(s.value for s in JournalStatus)
             try:
                 status_enum = JournalStatus(status)

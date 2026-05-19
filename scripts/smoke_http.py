@@ -1,4 +1,4 @@
-"""Smoke test the Bramble MCP server over its HTTP transport.
+"""Smoke test the Bramble MCP server over its authenticated HTTP transport.
 
 This script is for *manual* end-to-end verification. It is intentionally
 not part of the pytest suite – the suite uses the in-process FastMCP
@@ -6,31 +6,38 @@ client and does not need a running server. Use this when you want to
 poke a real, network-bound instance and watch the JSON logs on the
 server side.
 
+Since Phase 3 the HTTP transport requires a bearer token on every tool
+call, so a token is mandatory:
+
 Workflow
 --------
 Terminal 1 (server)::
 
     bramble-server --transport http --host 127.0.0.1 --port 8765 \\
-        --log-level DEBUG
+        --tokens-file ./secrets/tokens.json --log-level DEBUG
 
 Terminal 2 (this script)::
 
-    python scripts/smoke_http.py
-    # or, against a different endpoint:
-    python scripts/smoke_http.py --url http://127.0.0.1:9000/mcp/
+    python scripts/smoke_http.py --token <bramble-token>
+    # or, against the deployed endpoint:
+    python scripts/smoke_http.py \\
+        --url https://journal.last-strawberry.com/mcp/ \\
+        --token <bramble-token> --project bramble
+
+The ``--token`` must belong to ``--project`` (default ``bramble``):
+every write the script makes goes into that project.
 
 What it does
 ------------
-1. Connects to the MCP endpoint, lists the registered tools, and
-   verifies that all four Bramble tools are present.
-2. Appends three journal entries (two for ``bramble``, one for
-   ``elder-berry``) so the read / search / list paths have data.
-3. Reads them back via ``journal_read``.
-4. Searches for a keyword that only one entry contains.
-5. Calls ``journal_list_projects`` and prints the aggregate view.
-6. Issues two deliberately bad calls (unknown status, non-kebab
-   project) to verify that :func:`bramble.mcp_errors.translate_errors`
-   produces a clean ``ToolError`` instead of a 500.
+1. Connects with the token, lists tools, checks all four are present.
+2. Verifies a tokenless request is rejected (auth gate is on).
+3. Appends two journal entries to ``--project``.
+4. Reads them back via ``journal_read``.
+5. Searches for a keyword only one entry contains.
+6. Verifies a write into a *foreign* project is rejected (Decision B).
+7. Calls ``journal_list_projects`` and prints the aggregate view.
+8. Issues two deliberately bad calls (unknown status, non-kebab
+   project) to verify clean ``ToolError`` translation.
 
 Exit codes
 ----------
@@ -39,10 +46,8 @@ Exit codes
 * ``2`` – the server was not reachable.
 * ``3`` – something else blew up; full traceback is printed.
 
-The script writes to the real database the server points at. By
-default that is ``./data/bramble.db`` next to the project root, so
-the entries will accumulate across runs. Wipe the file if you want a
-clean slate.
+The script writes to the real database the server points at, so the
+entries accumulate across runs.
 """
 
 from __future__ import annotations
@@ -56,10 +61,15 @@ from typing import Any
 
 # fastmcp is a runtime dependency of bramble; importing it here is fine.
 from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.exceptions import ToolError
 
 
 DEFAULT_URL = "http://127.0.0.1:8765/mcp/"
+
+# A kebab-case project the token is guaranteed not to own, used for the
+# write-scope rejection check.
+FOREIGN_PROJECT = "smoke-foreign-project"
 
 
 # ---------------------------------------------------------------------------
@@ -82,17 +92,21 @@ def section(title: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Result unwrapping
+# Client / result helpers
 # ---------------------------------------------------------------------------
+def make_client(url: str, token: str | None) -> Client:
+    """Build an MCP client, optionally carrying a bearer token."""
+
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    return Client(StreamableHttpTransport(url, headers=headers))
+
+
 def unwrap(result: Any) -> Any:
     """Extract the structured payload from a FastMCP call_tool result.
 
-    FastMCP's ``Client.call_tool`` returns a ``CallToolResult`` object.
-    Recent versions expose the parsed value as ``.data``. Older
-    versions only expose ``.content`` (a list of ``TextContent``
-    objects whose ``.text`` holds JSON). Try the rich path first; fall
-    back to parsing JSON from the first text content so this script
-    works across a wider range of fastmcp releases.
+    Recent fastmcp exposes the parsed value as ``.data``; older
+    versions only expose ``.content`` (TextContent whose ``.text``
+    holds JSON). Try the rich path first, then fall back.
     """
 
     if hasattr(result, "data") and result.data is not None:
@@ -100,14 +114,12 @@ def unwrap(result: Any) -> Any:
 
     content = getattr(result, "content", None)
     if content:
-        first = content[0]
-        text = getattr(first, "text", None)
+        text = getattr(content[0], "text", None)
         if text is not None:
             import json
 
             return json.loads(text)
 
-    # Fall-through: return as-is and let the caller cope.
     return result
 
 
@@ -122,18 +134,16 @@ EXPECTED_TOOLS = {
 }
 
 
-async def run_smoke(url: str) -> int:
-    info(f"connecting to {url}")
+async def run_smoke(url: str, token: str, project: str) -> int:
+    info(f"connecting to {url} as project {project!r}")
 
-    async with Client(url) as client:
+    async with make_client(url, token) as client:
         # ------------------------------------------------------------------
         # 1. Tool discovery
         # ------------------------------------------------------------------
         section("tool discovery")
-        tools = await client.list_tools()
-        tool_names = {t.name for t in tools}
+        tool_names = {t.name for t in await client.list_tools()}
         print(f"  registered tools: {sorted(tool_names)}")
-
         missing = EXPECTED_TOOLS - tool_names
         if missing:
             fail(f"missing expected tools: {sorted(missing)}")
@@ -141,79 +151,65 @@ async def run_smoke(url: str) -> int:
         ok("all four expected tools are registered")
 
         # ------------------------------------------------------------------
-        # 2. Initial state
+        # 2. The auth gate rejects a tokenless request
         # ------------------------------------------------------------------
-        section("initial project overview")
-        result = await client.call_tool("journal_list_projects", {})
-        projects_before = unwrap(result)
-        print(f"  {len(projects_before)} project(s) before writes")
-        for p in projects_before:
-            print(
-                f"    {p['project']:20s} "
-                f"count={p['entry_count']:3d}  "
-                f"last={p['last_timestamp']}"
-            )
+        section("auth gate (request without a token)")
+        async with make_client(url, None) as anon:
+            try:
+                await anon.call_tool("journal_list_projects", {})
+            except ToolError as exc:
+                ok(f"tokenless call rejected as expected: {exc}")
+            except Exception as exc:  # noqa: BLE001
+                fail(f"expected ToolError, got {type(exc).__name__}: {exc}")
+                return 1
+            else:
+                fail("server accepted a tool call without any token")
+                return 1
 
         # ------------------------------------------------------------------
-        # 3. Append three entries
+        # 3. Append two entries to the token's project
         # ------------------------------------------------------------------
-        section("appending entries")
+        section(f"appending entries to {project!r}")
         run_marker = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
+        needle = f"smokeneedle{run_marker[-6:]}"
 
         result = await client.call_tool(
             "journal_append",
             {
-                "project": "bramble",
+                "project": project,
                 "status": "notiz",
                 "content": f"smoke run {run_marker}: alpha entry",
-                "phase": "Phase 2",
+                "phase": "Phase 3",
                 "title": "Smoke alpha",
             },
         )
         alpha = unwrap(result)
-        print(f"  appended id={alpha['id']} project={alpha['project']!r} "
-              f"status={alpha['status']!r}")
+        print(f"  appended id={alpha['id']} status={alpha['status']!r}")
 
         result = await client.call_tool(
             "journal_append",
             {
-                "project": "bramble",
+                "project": project,
                 "status": "bugfix",
-                "content": (
-                    f"smoke run {run_marker}: beta entry with keyword "
-                    f"smokeneedle{run_marker[-6:]}"
-                ),
+                "content": f"smoke run {run_marker}: beta entry with keyword {needle}",
                 "title": "Smoke beta",
             },
         )
         beta = unwrap(result)
         print(f"  appended id={beta['id']} status={beta['status']!r}")
-
-        result = await client.call_tool(
-            "journal_append",
-            {
-                "project": "elder-berry",
-                "status": "notiz",
-                "content": f"smoke run {run_marker}: isolation check",
-            },
-        )
-        gamma = unwrap(result)
-        print(f"  appended id={gamma['id']} project={gamma['project']!r}")
-
-        ok("three append calls succeeded")
+        ok("two append calls succeeded")
 
         # ------------------------------------------------------------------
         # 4. Read back
         # ------------------------------------------------------------------
-        section("journal_read bramble (n=10)")
-        result = await client.call_tool("journal_read", {"project": "bramble", "n": 10})
+        section(f"journal_read {project} (n=10)")
+        result = await client.call_tool(
+            "journal_read", {"project": project, "n": 10}
+        )
         entries = unwrap(result)
         print(f"  {len(entries)} entries returned (newest first)")
-        for e in entries[:5]:
-            title = e["title"] or "-"
-            print(f"    [{e['id']:>4}] {e['status']:14s} {title}")
         if len(entries) < 2:
-            fail("expected at least the two bramble entries we just wrote")
+            fail("expected at least the two entries we just wrote")
             return 1
         if entries[0]["id"] != beta["id"]:
             fail(
@@ -226,16 +222,13 @@ async def run_smoke(url: str) -> int:
         # ------------------------------------------------------------------
         # 5. Search
         # ------------------------------------------------------------------
-        needle = f"smokeneedle{run_marker[-6:]}"
-        section(f"journal_search bramble for {needle!r}")
+        section(f"journal_search {project} for {needle!r}")
         result = await client.call_tool(
             "journal_search",
-            {"project": "bramble", "query": needle, "limit": 5},
+            {"project": project, "query": needle, "limit": 5},
         )
         hits = unwrap(result)
         print(f"  {len(hits)} hit(s)")
-        for h in hits:
-            print(f"    [{h['id']:>4}] {h['content'][:70]}")
         if len(hits) != 1 or hits[0]["id"] != beta["id"]:
             fail(
                 f"expected exactly one hit (id={beta['id']}); "
@@ -245,18 +238,26 @@ async def run_smoke(url: str) -> int:
         ok("FTS5 search found exactly the beta entry")
 
         # ------------------------------------------------------------------
-        # 6. Project isolation
+        # 6. Write-scope binding: a foreign project is refused
         # ------------------------------------------------------------------
-        section("project isolation check (search bramble keyword in elder-berry)")
-        result = await client.call_tool(
-            "journal_search",
-            {"project": "elder-berry", "query": needle, "limit": 5},
-        )
-        cross_hits = unwrap(result)
-        if cross_hits:
-            fail(f"search leaked across projects: {cross_hits}")
+        section(f"write-scope check (append into {FOREIGN_PROJECT!r})")
+        try:
+            await client.call_tool(
+                "journal_append",
+                {
+                    "project": FOREIGN_PROJECT,
+                    "status": "notiz",
+                    "content": "this should be rejected by the scope check",
+                },
+            )
+        except ToolError as exc:
+            ok(f"foreign-project write rejected as expected: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            fail(f"expected ToolError, got {type(exc).__name__}: {exc}")
             return 1
-        ok("no cross-project leakage")
+        else:
+            fail("server accepted a write into a foreign project")
+            return 1
 
         # ------------------------------------------------------------------
         # 7. Overview after writes
@@ -267,15 +268,12 @@ async def run_smoke(url: str) -> int:
         for p in projects_after:
             print(
                 f"  {p['project']:20s} "
-                f"count={p['entry_count']:3d}  "
-                f"last={p['last_timestamp']}"
+                f"count={p['entry_count']:3d}  last={p['last_timestamp']}"
             )
-
-        names = {p["project"] for p in projects_after}
-        if not {"bramble", "elder-berry"} <= names:
-            fail(f"expected bramble and elder-berry in overview, got {names}")
+        if project not in {p["project"] for p in projects_after}:
+            fail(f"expected {project!r} in the overview")
             return 1
-        ok("both projects appear in the overview")
+        ok(f"{project!r} appears in the overview")
 
         # ------------------------------------------------------------------
         # 8. Negative: unknown status
@@ -284,18 +282,12 @@ async def run_smoke(url: str) -> int:
         try:
             await client.call_tool(
                 "journal_append",
-                {
-                    "project": "bramble",
-                    "status": "erfunden",
-                    "content": "this should be rejected",
-                },
+                {"project": project, "status": "erfunden", "content": "x"},
             )
         except ToolError as exc:
-            ok(f"rejected as expected: ToolError: {exc}")
-        except Exception as exc:  # noqa: BLE001 – we want to see *anything* else
-            fail(
-                f"expected ToolError, got {type(exc).__name__}: {exc}"
-            )
+            ok(f"rejected as expected: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            fail(f"expected ToolError, got {type(exc).__name__}: {exc}")
             return 1
         else:
             fail("server accepted an unknown status value")
@@ -306,16 +298,11 @@ async def run_smoke(url: str) -> int:
         # ------------------------------------------------------------------
         section("negative test: non-kebab project name")
         try:
-            await client.call_tool(
-                "journal_read",
-                {"project": "Bad_Name", "n": 5},
-            )
+            await client.call_tool("journal_read", {"project": "Bad_Name", "n": 5})
         except ToolError as exc:
-            ok(f"rejected as expected: ToolError: {exc}")
+            ok(f"rejected as expected: {exc}")
         except Exception as exc:  # noqa: BLE001
-            fail(
-                f"expected ToolError, got {type(exc).__name__}: {exc}"
-            )
+            fail(f"expected ToolError, got {type(exc).__name__}: {exc}")
             return 1
         else:
             fail("server accepted a non-kebab project name")
@@ -337,19 +324,29 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_URL,
         help=f"MCP HTTP endpoint URL (default: {DEFAULT_URL})",
     )
+    parser.add_argument(
+        "--token",
+        required=True,
+        help="bearer token; must belong to --project.",
+    )
+    parser.add_argument(
+        "--project",
+        default="bramble",
+        help="project the token owns and the script writes to (default: bramble).",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        return asyncio.run(run_smoke(args.url))
+        return asyncio.run(run_smoke(args.url, args.token, args.project))
     except (ConnectionRefusedError, ConnectionError) as exc:
         fail(f"connection failed: {exc}")
         fail("is the server running on the URL above?")
         fail(
-            "start it with: "
-            "bramble-server --transport http --host 127.0.0.1 --port 8765"
+            "start it with: bramble-server --transport http "
+            "--host 127.0.0.1 --port 8765 --tokens-file ./secrets/tokens.json"
         )
         return 2
     except KeyboardInterrupt:

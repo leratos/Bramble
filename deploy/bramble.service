@@ -1,0 +1,51 @@
+# systemd unit for the Bramble MCP journal server (Phase-3 Decision H).
+#
+# Install: copy to /etc/systemd/system/bramble.service, then
+#   systemctl daemon-reload && systemctl enable --now bramble
+# See docs/deployment.md for the full runbook.
+
+[Unit]
+Description=Bramble MCP journal server
+Documentation=https://github.com/leratos/Bramble
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bramble
+Group=bramble
+WorkingDirectory=/opt/bramble
+ExecStart=/opt/bramble/.venv/bin/bramble-server
+Restart=on-failure
+RestartSec=5
+
+# Runtime configuration. ServerConfig resolves CLI > Env > Default,
+# so these env vars are the deployment's single source of truth.
+Environment=PYTHONUNBUFFERED=1
+Environment=BRAMBLE_DB_PATH=/opt/bramble/data/bramble.db
+Environment=BRAMBLE_TRANSPORT=http
+Environment=BRAMBLE_HOST=127.0.0.1
+Environment=BRAMBLE_PORT=8765
+Environment=BRAMBLE_LOG_LEVEL=INFO
+Environment=BRAMBLE_TOKENS_FILE=/opt/bramble/secrets/tokens.json
+Environment=BRAMBLE_RATE_LIMIT_PER_TOKEN=60
+Environment=BRAMBLE_RATE_LIMIT_PER_IP=120
+
+# Hardening. The process only ever needs to read its code, venv and
+# token file and to write the SQLite database (+ its WAL sidecars);
+# logs go to stderr -> journald, so no log directory is required.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/bramble/data
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

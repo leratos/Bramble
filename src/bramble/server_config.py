@@ -6,9 +6,9 @@ in the Phase-2 concept document with the priority:
 
     CLI argument > environment variable > built-in default
 
-The class is also the place where Phase 3 will hook in additional
-fields (auth-token path, rate-limit overrides, etc.). Keeping it
-isolated in its own module makes that extension a localised change.
+Phase 3 added the auth-token path and the rate-limit knobs as three
+further fields with the same resolution rule. Keeping the class
+isolated in its own module made that extension a localised change.
 """
 
 from __future__ import annotations
@@ -29,18 +29,31 @@ _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 8765
 _DEFAULT_LOG_LEVEL = "INFO"
 
+# Phase-3 defaults. The token file lives outside the repo
+# (``.gitignore`` ignores ``secrets/``); the systemd unit overrides
+# the path to ``/opt/bramble/secrets/tokens.json`` via the env var.
+# Rate-limit values come straight from Decision E in the Phase-3
+# concept document.
+_DEFAULT_TOKENS_FILE = Path("./secrets/tokens.json")
+_DEFAULT_RATE_LIMIT_PER_TOKEN = 60
+_DEFAULT_RATE_LIMIT_PER_IP = 120
+
 _VALID_TRANSPORTS: frozenset[str] = frozenset({"stdio", "http"})
 _VALID_LOG_LEVELS: frozenset[str] = frozenset(
     {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 )
 
 # Env-var names. Kept as module constants so callers (tests, Phase-3
-# systemd unit) can refer to them by name instead of string-typing.
+# systemd unit, scripts/gen_token.py) can refer to them by name
+# instead of string-typing.
 ENV_DB_PATH = "BRAMBLE_DB_PATH"
 ENV_TRANSPORT = "BRAMBLE_TRANSPORT"
 ENV_HOST = "BRAMBLE_HOST"
 ENV_PORT = "BRAMBLE_PORT"
 ENV_LOG_LEVEL = "BRAMBLE_LOG_LEVEL"
+ENV_TOKENS_FILE = "BRAMBLE_TOKENS_FILE"
+ENV_RATE_LIMIT_PER_TOKEN = "BRAMBLE_RATE_LIMIT_PER_TOKEN"
+ENV_RATE_LIMIT_PER_IP = "BRAMBLE_RATE_LIMIT_PER_IP"
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +77,16 @@ class ServerConfig:
     log_level:
         Standard Python logging level name, upper-case
         (``"DEBUG"`` … ``"CRITICAL"``).
+    tokens_file:
+        Path to the JSON bearer-token map. Only consulted for the
+        ``http`` transport, where every request must carry a valid
+        token; ignored for ``stdio``.
+    rate_limit_per_token:
+        Allowed requests per minute for a single token. Doubles as the
+        token-bucket capacity (Decision E).
+    rate_limit_per_ip:
+        Allowed requests per minute for a single client IP – the
+        backstop applied before a token is known.
     """
 
     db_path: Path
@@ -71,6 +94,9 @@ class ServerConfig:
     host: str
     port: int
     log_level: str
+    tokens_file: Path = _DEFAULT_TOKENS_FILE
+    rate_limit_per_token: int = _DEFAULT_RATE_LIMIT_PER_TOKEN
+    rate_limit_per_ip: int = _DEFAULT_RATE_LIMIT_PER_IP
 
     def __post_init__(self) -> None:
         self._validate_db_path()
@@ -78,6 +104,8 @@ class ServerConfig:
         self._validate_host()
         self._validate_port()
         self._validate_log_level()
+        self._validate_tokens_file()
+        self._validate_rate_limits()
 
     # ------------------------------------------------------------------
     # Validation helpers
@@ -116,6 +144,21 @@ class ServerConfig:
                 f"log_level {self.log_level!r} is not allowed; "
                 f"must be one of: {allowed}"
             )
+
+    def _validate_tokens_file(self) -> None:
+        if not isinstance(self.tokens_file, Path):
+            raise TypeError("tokens_file must be a pathlib.Path")
+
+    def _validate_rate_limits(self) -> None:
+        # bool is a subclass of int – exclude it explicitly.
+        for name, value in (
+            ("rate_limit_per_token", self.rate_limit_per_token),
+            ("rate_limit_per_ip", self.rate_limit_per_ip),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{name} must be an int")
+            if value <= 0:
+                raise ValueError(f"{name} must be positive")
 
     # ------------------------------------------------------------------
     # Factory
@@ -165,6 +208,23 @@ class ServerConfig:
             env_value=environ.get(ENV_LOG_LEVEL),
             default=_DEFAULT_LOG_LEVEL,
         ).upper()
+        tokens_file = _resolve_path(
+            cli=ns.tokens_file,
+            env_value=environ.get(ENV_TOKENS_FILE),
+            default=_DEFAULT_TOKENS_FILE,
+        )
+        rate_limit_per_token = _resolve_int(
+            cli=ns.rate_limit_per_token,
+            env_value=environ.get(ENV_RATE_LIMIT_PER_TOKEN),
+            default=_DEFAULT_RATE_LIMIT_PER_TOKEN,
+            field_name="rate_limit_per_token",
+        )
+        rate_limit_per_ip = _resolve_int(
+            cli=ns.rate_limit_per_ip,
+            env_value=environ.get(ENV_RATE_LIMIT_PER_IP),
+            default=_DEFAULT_RATE_LIMIT_PER_IP,
+            field_name="rate_limit_per_ip",
+        )
 
         return cls(
             db_path=db_path,
@@ -172,6 +232,9 @@ class ServerConfig:
             host=host,
             port=port,
             log_level=log_level,
+            tokens_file=tokens_file,
+            rate_limit_per_token=rate_limit_per_token,
+            rate_limit_per_ip=rate_limit_per_ip,
         )
 
 
@@ -205,6 +268,32 @@ def _build_parser() -> argparse.ArgumentParser:
         "--log-level",
         dest="log_level",
         help=f"Python logging level name (env: {ENV_LOG_LEVEL}).",
+    )
+    parser.add_argument(
+        "--tokens-file",
+        dest="tokens_file",
+        help=(
+            "Path to the JSON bearer-token map, used by the http "
+            f"transport (env: {ENV_TOKENS_FILE})."
+        ),
+    )
+    parser.add_argument(
+        "--rate-limit-per-token",
+        dest="rate_limit_per_token",
+        type=int,
+        help=(
+            "Requests per minute allowed for a single token "
+            f"(env: {ENV_RATE_LIMIT_PER_TOKEN})."
+        ),
+    )
+    parser.add_argument(
+        "--rate-limit-per-ip",
+        dest="rate_limit_per_ip",
+        type=int,
+        help=(
+            "Requests per minute allowed for a single client IP "
+            f"(env: {ENV_RATE_LIMIT_PER_IP})."
+        ),
     )
     return parser
 

@@ -122,7 +122,7 @@ class JournalDB:
     # Schema
     # ------------------------------------------------------------------
     def initialize(self) -> None:
-        """Create the schema if it does not exist.
+        """Create the schema if it does not exist and enable WAL mode.
 
         This is idempotent: calling it on an already-initialised
         database is a no-op.
@@ -133,10 +133,20 @@ class JournalDB:
 
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
+            # WAL lets multiple readers run alongside a single writer
+            # and cuts down SQLITE_BUSY errors. It matters here because
+            # the MCP tools reach SQLite from several threads via
+            # asyncio.to_thread. The mode is stored in the database
+            # header, so this is a one-time switch (Phase-3 Decision I).
+            mode = conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+            if str(mode).lower() != "wal":
+                logger.warning(
+                    "could not enable WAL mode; journal_mode is %r", mode
+                )
             for statement in _SCHEMA_STATEMENTS:
                 conn.execute(statement)
             conn.commit()
-        logger.info("JournalDB initialised at %s", self._db_path)
+        logger.info("JournalDB initialised at %s (journal_mode=%s)", self._db_path, mode)
 
     # ------------------------------------------------------------------
     # Mutators
