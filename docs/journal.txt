@@ -335,3 +335,72 @@ Naechster Schritt: Phase 3 (Deployment & Haertung). Planungs-Entwurf
 liegt in docs/concepts/phase-3-deployment.md -- vor Code-Beginn die
 Designentscheidungen (Abschnitt 2) und die offenen Fragen (Abschnitt
 8) mit dem Nutzer bestaetigen.
+
+## Phase 3 (Deployment & Haertung): Code umgesetzt, Host-Deploy offen
+Datum: 2026-05-19 (UTC)
+Branch: feature/phase-3-deployment
+
+Umsetzung des Planungs-Entwurfs docs/concepts/phase-3-deployment.md.
+Die acht Etappen aus Abschnitt 7 in Reihenfolge umgesetzt.
+
+Etappe 1 -- FastMCP-Auth/Middleware-Spike:
+- FastMCP 3.2.4 verifiziert: Middleware via app.add_middleware(),
+  Hook on_call_tool laeuft vor jedem Tool-Call.
+- Token aus Header via get_http_headers(include={"authorization"}),
+  Client-IP via get_http_request(); raise ToolError blockt sauber;
+  ein ContextVar aus der Middleware ist im Tool sichtbar.
+- Spike war Wegwerf-Code, nicht im Repo.
+
+Etappe 2 -- AuthValidator + Token-Datei:
+- src/bramble/auth_validator.py: laedt {projekt: token}-JSON, hasht
+  Tokens (SHA-256) in eine hash->projekt-Map -- kein zeichenweiser
+  Vergleich, kein Timing-Leak. authenticate() loggt bei Fehlschlag
+  das JSON-Event event=auth_failed inkl. client_ip.
+- scripts/gen_token.py: erzeugt secrets.token_urlsafe(32), traegt es
+  atomar in tokens.json ein (Modus 600).
+
+Etappe 3 -- RateLimiter:
+- src/bramble/rate_limiter.py: Token-Bucket in-memory, getrennte
+  Pools pro Projekt (60/min) und pro IP (120/min). Injizierbare
+  Zeitquelle fuer deterministische Tests ohne sleep.
+
+Etappe 4 -- ServerConfig erweitert:
+- Neue Felder tokens_file, rate_limit_per_token, rate_limit_per_ip
+  mit Defaults; Aufloesung weiter CLI > Env > Default.
+
+Etappe 5 -- Middleware verdrahtet:
+- _AuthRateLimitMiddleware (in journal_mcp_server.py) konsumiert die
+  DI-Slots. Reihenfolge: IP-Limit -> Auth -> Token-Limit.
+- X-Forwarded-For wird nur von 127.0.0.1/::1 vertraut (Spoofing-
+  Schutz aus der Risiko-Liste).
+- journal_append prueft die Token-Projekt-Bindung (Decision B):
+  Schreiben nur ins eigene Projekt, Lesen/Suchen bleibt global.
+- __main__.py baut AuthValidator+RateLimiter nur fuer http; stdio
+  bleibt ohne Auth.
+
+Etappe 6 -- WAL-Mode:
+- JournalDB.initialize() setzt PRAGMA journal_mode=WAL (Decision I);
+  schliesst eine offene Phase-1-Schuld.
+
+Etappe 7 -- Deployment-Artefakte:
+- deploy/bramble.service (systemd, gehaertet, Installpfad /opt/bramble),
+  deploy/plesk-nginx-directives.conf, deploy/fail2ban/{filter,jail}.
+- docs/deployment.md: vollstaendiges Runbook inkl. WAL-sicherer
+  Borg-Snapshot-Erweiterung (.backup-Snapshot vor borg create).
+
+Etappe 8 -- Verifikation:
+- pytest: 242 passed (vorher 158; +84 neue Tests). Auth- und
+  Rate-Limit-Logik in-process getestet, ohne Netz-Zugriff.
+- Lokaler HTTP-Smoke-Test (scripts/smoke_http.py, jetzt token-faehig)
+  gegen einen echten bramble-server: Auth-Gate, Token-Scope und
+  Negativpfade alle gruen.
+- auth_failed-Logzeile gegen den Fail2Ban-failregex geprueft: matcht
+  und captured die Client-IP korrekt. WAL-Mode am Live-Server
+  bestaetigt.
+
+Offen / naechster Schritt:
+- Aufspielen auf den Host journal.last-strawberry.com macht der
+  Nutzer manuell anhand docs/deployment.md (Schritte 1-9). Die
+  Deployment-Artefakte sind Linux-only und auf dem Entwicklungs-
+  rechner nicht voll testbar.
+- Danach Phase 4: Daten-Import und Connector-Setup.

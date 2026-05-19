@@ -11,6 +11,9 @@ from bramble.server_config import (
     ENV_HOST,
     ENV_LOG_LEVEL,
     ENV_PORT,
+    ENV_RATE_LIMIT_PER_IP,
+    ENV_RATE_LIMIT_PER_TOKEN,
+    ENV_TOKENS_FILE,
     ENV_TRANSPORT,
     ServerConfig,
 )
@@ -70,6 +73,36 @@ class TestServerConfigConstruction:
         with pytest.raises(ValueError):
             ServerConfig(**kwargs)
 
+    def test_phase_3_fields_have_defaults(self) -> None:
+        # The five Phase-2 kwargs alone must still construct: the
+        # Phase-3 fields carry defaults.
+        cfg = ServerConfig(**self._valid_kwargs())
+        assert cfg.tokens_file == Path("./secrets/tokens.json")
+        assert cfg.rate_limit_per_token == 60
+        assert cfg.rate_limit_per_ip == 120
+
+    def test_tokens_file_must_be_path(self) -> None:
+        kwargs = self._valid_kwargs() | {"tokens_file": "./secrets/tokens.json"}
+        with pytest.raises(TypeError):
+            ServerConfig(**kwargs)
+
+    @pytest.mark.parametrize(
+        "field", ["rate_limit_per_token", "rate_limit_per_ip"]
+    )
+    @pytest.mark.parametrize("bad_value", [0, -1])
+    def test_rate_limit_must_be_positive(self, field: str, bad_value: int) -> None:
+        kwargs = self._valid_kwargs() | {field: bad_value}
+        with pytest.raises(ValueError):
+            ServerConfig(**kwargs)
+
+    @pytest.mark.parametrize(
+        "field", ["rate_limit_per_token", "rate_limit_per_ip"]
+    )
+    def test_rate_limit_rejects_bool(self, field: str) -> None:
+        kwargs = self._valid_kwargs() | {field: True}
+        with pytest.raises(TypeError):
+            ServerConfig(**kwargs)
+
 
 # ---------------------------------------------------------------------------
 # from_sources(): priority CLI > Env > Default
@@ -82,6 +115,41 @@ class TestFromSources:
         assert cfg.host == "127.0.0.1"
         assert cfg.port == 8765
         assert cfg.log_level == "INFO"
+        assert cfg.tokens_file == Path("./secrets/tokens.json")
+        assert cfg.rate_limit_per_token == 60
+        assert cfg.rate_limit_per_ip == 120
+
+    def test_phase_3_env_overrides_default(self) -> None:
+        env = {
+            ENV_TOKENS_FILE: "/opt/bramble/secrets/tokens.json",
+            ENV_RATE_LIMIT_PER_TOKEN: "30",
+            ENV_RATE_LIMIT_PER_IP: "200",
+        }
+        cfg = ServerConfig.from_sources(argv=[], env=env)
+        assert cfg.tokens_file == Path("/opt/bramble/secrets/tokens.json")
+        assert cfg.rate_limit_per_token == 30
+        assert cfg.rate_limit_per_ip == 200
+
+    def test_phase_3_cli_overrides_env(self) -> None:
+        env = {ENV_TOKENS_FILE: "/env/tokens.json", ENV_RATE_LIMIT_PER_TOKEN: "10"}
+        argv = [
+            "--tokens-file",
+            "/cli/tokens.json",
+            "--rate-limit-per-token",
+            "90",
+            "--rate-limit-per-ip",
+            "150",
+        ]
+        cfg = ServerConfig.from_sources(argv=argv, env=env)
+        assert cfg.tokens_file == Path("/cli/tokens.json")
+        assert cfg.rate_limit_per_token == 90
+        assert cfg.rate_limit_per_ip == 150
+
+    def test_non_integer_rate_limit_env_raises(self) -> None:
+        with pytest.raises(ValueError, match="rate_limit_per_token"):
+            ServerConfig.from_sources(
+                argv=[], env={ENV_RATE_LIMIT_PER_TOKEN: "lots"}
+            )
 
     def test_env_overrides_default(self) -> None:
         env = {
