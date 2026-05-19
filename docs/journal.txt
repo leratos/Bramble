@@ -312,3 +312,26 @@ Lessons learned:
 - Beim Erweitern von Paket-Init-Imports kuenftig pruefen, welche
   transitiven Deps man dabei einzieht. Das sollte ein Standard-
   Checklisten-Punkt fuer Aufraeum-Arbeiten werden.
+
+## Abgeschlossen: Phase-2-Cleanup nach main gemergt (PR #2)
+Datum: 2026-05-12 (UTC)
+Branch: chore/phase-2-cleanup -> main
+Nachtrag: Eintrag am 2026-05-18 backfilled; der Merge selbst wurde
+beim Abschluss nicht ins Journal geschrieben.
+
+Umgesetzt:
+- chore/phase-2-cleanup nach GitHub gepusht, PR #2 aufgemacht
+- Review-Kommentar von chatgpt-codex-connector -> Lazy-FastMCP-
+  Import-Bugfix (siehe Eintrag oben, Commit 5ad60e6); der Fix lief
+  im selben PR mit
+- PR #2 nach main gemergt (Merge-Commit 9b535d0)
+- main enthaelt damit: Phase 1 + Phase 2 + Phase-2-Cleanup +
+  Lazy-Import-Bugfix; Tests 158 passed
+
+Der gesamte Phase-2-Block (inkl. Cleanup) ist auf main. Damit ist
+"lokal lauffaehig" final abgeschlossen.
+
+Naechster Schritt: Phase 3 (Deployment & Haertung). Planungs-Entwurf
+liegt in docs/concepts/phase-3-deployment.md -- vor Code-Beginn die
+Designentscheidungen (Abschnitt 2) und die offenen Fragen (Abschnitt
+8) mit dem Nutzer bestaetigen.
