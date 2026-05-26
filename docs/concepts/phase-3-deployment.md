@@ -3,8 +3,7 @@
 Status: **Abgeschlossen** (2026-05-26). Phase-3-Code wurde mit PR #4
 nach `main` gemergt; der Host-Deploy auf
 `journal.last-strawberry.com` ist erfolgt. Das WAL-sichere
-Borg-Backup ist als kurzes Folge-Arbeitspaket im Runbook konkretisiert
-und muss auf dem Host noch final per Restore-Test verifiziert werden.
+Borg-Backup ist inklusive Restore-Test auf dem Host verifiziert.
 
 Dieser Planungs-Entwurf wurde am 2026-05-18 mit dem Nutzer geklärt,
 anschließend umgesetzt und beim Host-Deploy am 2026-05-26 verifiziert.

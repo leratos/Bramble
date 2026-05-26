@@ -1,6 +1,8 @@
 # Phase 4 – Import & Connector-Setup
 
-Status: **Entwurf – nächstes Arbeitspaket** (2026-05-26).
+Status: **In Arbeit** (2026-05-26). Backup/Restore ist verifiziert;
+der Importer für legacy `journal.txt`-Dateien ist als erstes
+Phase-4-Arbeitspaket umgesetzt.
 
 Phase 4 macht Bramble selbst zum produktiv genutzten Journal: bestehende
 `journal.txt`-Dateien werden importiert, anschließend schreiben Claude.ai
@@ -8,16 +10,18 @@ und Claude Code über die MCP-Tools direkt in die zentrale Datenbank.
 
 ## 1. Voraussetzung
 
-Vor dem Import muss Schritt 8 aus dem Deployment-Runbook abgeschlossen
-sein:
+Schritt 8 aus dem Deployment-Runbook ist abgeschlossen und am
+2026-05-26 gegen das Archiv `server-2026-05-26_20:39` verifiziert:
 
 * Borg sichert `/opt/bramble/backup-staging/bramble.db`.
 * Borg sichert `/opt/bramble/secrets/tokens.json`.
-* Ein Restore-Test gegen einen frischen Archivstand liefert
-  `PRAGMA integrity_check;` → `ok`.
+* Der Restore-Test liefert `PRAGMA integrity_check;` → `ok`.
+* `SELECT COUNT(*) FROM journal_entries;` → `2`.
+* `SELECT COUNT(*) FROM journal_fts;` → `2`.
 
-Ohne diesen Restore-Test wird nicht importiert. Der Import ist zwar
-append-only, aber er verändert die zentrale Produktiv-DB dauerhaft.
+Damit ist der Backup-Stopper vor Phase 4 erledigt. Der Import ist zwar
+append-only, aber er verändert die zentrale Produktiv-DB dauerhaft; pro
+Projekt wird deshalb weiterhin erst ein Dry-Run gemacht.
 
 ## 2. Import-Reihenfolge
 
@@ -39,10 +43,12 @@ systemctl restart bramble
 ## 3. Import-Strategie
 
 Der Import sollte als eigenes Script entstehen, nicht per Hand über
-`journal_append`. Geplante Eigenschaften:
+`journal_append`. Script: `scripts/import_journal_txt.py`.
 
-* `--dry-run` zeigt erkannte Einträge, Status, Titel und Datum, schreibt
-  aber nichts.
+Eigenschaften:
+
+* Default ist Dry-Run: erkannte Einträge, Status, Titel und Datum werden
+  angezeigt, aber nichts wird geschrieben.
 * `--project <name>` erzwingt das Zielprojekt und nutzt dieselbe
   kebab-case-Regel wie der MCP-Layer.
 * `--source <path>` liest eine bestehende `journal.txt`.
@@ -55,6 +61,31 @@ Der Import sollte als eigenes Script entstehen, nicht per Hand über
   keinen künstlichen Zusatz.
 * Nicht eindeutig parsebare Abschnitte werden im Dry-Run gemeldet und
   erst nach manueller Entscheidung importiert.
+* Identische Einträge werden im Execute-Modus standardmäßig
+  übersprungen, damit ein versehentlicher zweiter Import keine
+  Duplikate erzeugt. `--allow-duplicates` ist nur für bewusste
+  Sonderfälle gedacht.
+
+Dry-Run für Brambles eigenes Journal auf dem Host:
+
+```sh
+sudo -u bramble /opt/bramble/.venv/bin/python \
+    /opt/bramble/scripts/import_journal_txt.py \
+    --project bramble \
+    --source /opt/bramble/docs/journal.txt \
+    --db /opt/bramble/data/bramble.db
+```
+
+Wenn der Dry-Run `issues: 0` meldet, Import ausführen:
+
+```sh
+sudo -u bramble /opt/bramble/.venv/bin/python \
+    /opt/bramble/scripts/import_journal_txt.py \
+    --project bramble \
+    --source /opt/bramble/docs/journal.txt \
+    --db /opt/bramble/data/bramble.db \
+    --execute
+```
 
 ## 4. Mindest-Verifikation pro Projekt
 
@@ -102,7 +133,6 @@ Wichtig für System-Prompts ab Phase 5:
 
 ## 6. Offene Entscheidungen
 
-* Import-Script-Name: Vorschlag `scripts/import_journal_txt.py`.
 * Umgang mit sehr alten oder handformatierten Journal-Abschnitten, die
   kein klares `Datum:` haben.
 * Ob Smoke-Test-Einträge vor Brambles Eigenimport gelöscht werden oder

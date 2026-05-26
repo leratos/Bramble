@@ -556,3 +556,122 @@ Nachtrag Borg-Script:
 - Bewusst NICHT empfohlen: /opt/bramble/ komplett sichern, weil sonst
   die venv mit ins Backup wandert. Die Live-DB bleibt ebenfalls aus der
   Pfadliste; gesichert wird nur der konsistente Snapshot.
+
+Host-Verifikation Backup:
+- sudo -u bramble git -C /opt/bramble pull hat main von c52cf95 auf
+  7eb055d fast-forward aktualisiert; deploy/bramble-backup-snapshot.sh
+  ist damit auf dem Host vorhanden.
+- chmod 755 fuer deploy/bramble-backup-snapshot.sh gesetzt.
+- sqlite3 ist installiert (3.45.1-1ubuntu2.5).
+- Manueller Snapshot-Lauf:
+    sudo /opt/bramble/deploy/bramble-backup-snapshot.sh
+  Ergebnis: /opt/bramble/backup-staging/bramble.db
+- Zentrales /usr/local/bin/borg-backup.sh mit Bramble-Ergaenzungen
+  manuell gestartet. Lauf erfolgreich:
+  Archive: server-2026-05-26_20:39
+  Fingerprint: 4c46e9a4f96aace2c1f5a8f6950ec18208f9b1848275a72d24e474c5fd2b46fc
+  borg create rc 0, prune rc 0, compact rc 0.
+- Bramble ist damit im Borg-Backup enthalten:
+  Snapshot /opt/bramble/backup-staging/bramble.db,
+  /opt/bramble/secrets/tokens.json,
+  /etc/systemd/system/bramble.service,
+  /etc/fail2ban/filter.d/bramble.conf,
+  /etc/fail2ban/jail.d/bramble.conf.
+
+Noch offen:
+- Restore-Test aus docs/deployment.md Schritt 8 gegen
+  server-2026-05-26_20:39 ausfuehren und Ergebnis dokumentieren.
+
+## Abgeschlossen: Backup/Restore fuer Bramble verifiziert
+Datum: 2026-05-26 (UTC)
+Branch: main
+
+Restore-Test gegen das frisch erstellte Borg-Archiv
+server-2026-05-26_20:39 abgeschlossen.
+
+Erster Versuch scheiterte nur an Shell-Redirect-Rechten:
+- sudo mkdir legte /tmp/bramble-restore-test root-owned an.
+- Die Umleitung ">" lief danach als Nutzer lera, nicht unter sudo,
+  und konnte /tmp/bramble-restore-test/bramble.db nicht schreiben.
+- Ein danach gestartetes sqlite3 sah eine leere DB und meldete zwar
+  integrity_check=ok, aber "no such table: journal_entries".
+
+Korrektur:
+- Restore-Test komplett in einer sudo bash -c Shell ausgefuehrt,
+  inklusive Borg-Env, rm -rf /tmp/bramble-restore-test, mkdir,
+  borg extract --stdout und Redirect in die Test-DB.
+
+Ergebnis:
+- PRAGMA integrity_check; -> ok
+- SELECT COUNT(*) FROM journal_entries; -> 2
+- SELECT COUNT(*) FROM journal_fts; -> 2
+- /tmp/bramble-restore-test/bramble.db: 32K
+
+Damit ist Schritt 8 aus docs/deployment.md abgeschlossen:
+- Bramble-Snapshot ist im Borg-Archiv enthalten.
+- tokens.json ist im Borg-Archiv enthalten.
+- Restore der SQLite-DB aus Borg funktioniert.
+
+Naechster Schritt:
+- Phase 4 starten: Import-Script fuer bestehende journal.txt-Dateien
+  bauen, zuerst Brambles eigenes Journal als Dry-Run importieren.
+
+## In Arbeit: Phase 4 – Import-Script fuer legacy journal.txt
+Datum: 2026-05-26 (UTC)
+Branch: main
+
+Phase 4 gestartet. Ziel des ersten Arbeitspakets: bestehende
+docs/journal.txt-Dateien kontrolliert in Brambles zentrale SQLite-DB
+uebernehmen, ohne den HTTP-MCP-Pfad oder Rate-Limits zu verwenden.
+
+Umgesetzt:
+- scripts/import_journal_txt.py angelegt.
+- Default ist Dry-Run; Schreiben nur mit --execute.
+- CLI:
+    --project <kebab-case>
+    --source <journal.txt>
+    --db <bramble.db>
+    --execute
+    --allow-warnings
+    --allow-duplicates
+- Parser liest ##-Abschnitte, erkennt Status aus Heading-Prefixen:
+  In Arbeit, Abgeschlossen, Bugfix, Notiz.
+- Sonderfall fuer bestehenden Bramble-Eintrag
+  "Phase 3 ... Code umgesetzt, Host-Deploy offen": Status wird als
+  in_arbeit inferiert, weil der alte Heading nicht dem Prefix-Schema
+  folgt.
+- Datum: "Datum: YYYY-MM-DD (UTC)" wird zu 12:00:00+00:00;
+  vorhandene Uhrzeiten wie "YYYY-MM-DD HH:MM" werden uebernommen.
+- Content bleibt der Abschnittskoerper ohne Datum-Zeile; Branch- und
+  Detailzeilen bleiben erhalten.
+- Phase wird heuristisch aus dem Titel abgeleitet, z.B. Phase 1,
+  Phase-2-Cleanup -> Phase 2.
+- Execute-Modus schreibt direkt via JournalDB und ueberspringt
+  identische Eintraege, damit ein zweiter Lauf keine Duplikate erzeugt.
+
+Tests:
+- tests/test_import_journal_txt.py ergaenzt:
+  Parsing von Status/Datum/Phase/Content,
+  Sonderfall Phase-3-Heading,
+  Unknown-Status- und Missing-Date-Issues,
+  echtes Bramble-Journal parsebar ohne Issues,
+  Dry-Run erzeugt keine DB,
+  Execute importiert und skippt Duplikate,
+  non-kebab project -> Fehler.
+- Einzeltestlauf: .\.venv\Scripts\python -m pytest
+  tests\test_import_journal_txt.py -> 8 passed.
+- Gesamtsuite: .\.venv\Scripts\python -m pytest ->
+  249 passed, 1 skipped.
+
+Dry-Run lokal:
+- .\.venv\Scripts\python scripts\import_journal_txt.py --project bramble
+  --source docs\journal.txt --db data\phase4-dryrun.db
+- Ergebnis vor diesem Journal-Eintrag: 12 entries, 0 issues.
+- Ergebnis nach diesem Journal-Eintrag: 13 entries, 0 issues.
+- In beiden Laeufen keine DB geschrieben.
+
+Naechste Schritte:
+- Gesamte pytest-Suite laufen lassen.
+- Host pullen, Dry-Run gegen /opt/bramble/docs/journal.txt ausfuehren.
+- Vor --execute entscheiden, ob die zwei Smoke-Test-Eintraege in der
+  Produktiv-DB geloescht oder als Betriebsnachweis behalten werden.

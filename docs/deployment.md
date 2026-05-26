@@ -235,23 +235,42 @@ zwar restaurierbar, aber alle eingerichteten Connector-Tokens müssten
 nach einem Restore rotiert und in den Clients neu eingetragen werden.
 
 Nach dem ersten Backup einen Restore-Test gegen den frisch erzeugten
-Archivstand machen:
+Archivstand machen. Wichtig: die Umleitung `>` muss in derselben
+Root-Shell laufen wie `borg extract`, sonst schreibt die Shell als
+normaler Benutzer nach `/tmp` und kann an Verzeichnisrechten scheitern.
 
 ```sh
+sudo bash -c '
+set -euo pipefail
+
+export BORG_REPO="ssh://u570858@u570858.your-storagebox.de:23/./backups/server"
+export BORG_RSH="ssh -i /root/.ssh/hetzner_storage_box"
+export BORG_PASSPHRASE
+BORG_PASSPHRASE=$(cat /root/.borg-passphrase)
+
+rm -rf /tmp/bramble-restore-test
 mkdir -p /tmp/bramble-restore-test
-borg extract --stdout <repo>::<archive> opt/bramble/backup-staging/bramble.db \
+
+borg extract --stdout "$BORG_REPO::<archive>" opt/bramble/backup-staging/bramble.db \
     > /tmp/bramble-restore-test/bramble.db
+
 sqlite3 /tmp/bramble-restore-test/bramble.db "PRAGMA integrity_check;"
 sqlite3 /tmp/bramble-restore-test/bramble.db \
     "SELECT COUNT(*) FROM journal_entries;"
 sqlite3 /tmp/bramble-restore-test/bramble.db \
     "SELECT COUNT(*) FROM journal_fts;"
-rm -rf /tmp/bramble-restore-test
+ls -lh /tmp/bramble-restore-test/bramble.db
+'
 ```
 
 Erwartung: `integrity_check` gibt `ok` aus; die beiden Counts laufen
 ohne Fehler. Die Zahlen müssen nicht identisch sein, weil FTS5 intern
 mehrere Segment-/Indexzeilen verwaltet.
+
+Verifizierter Lauf am 2026-05-26 gegen
+`server-2026-05-26_20:39`: `integrity_check` → `ok`,
+`journal_entries` → `2`, `journal_fts` → `2`,
+Snapshot-Größe `32K`.
 
 ### Einbau in das aktuelle `/usr/local/bin/borg-backup.sh`
 

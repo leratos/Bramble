@@ -14,9 +14,9 @@ ablegt und projektübergreifend durchsuchbar macht.
 In aktiver Entwicklung. **Phase 3 – Deployment & Härtung** ist
 abgeschlossen: Bramble läuft als systemd-Service hinter Plesk/Nginx auf
 `journal.last-strawberry.com`, mit Bearer-Token-Auth, Rate-Limit,
-Fail2Ban und WAL-sicherem SQLite-Betrieb. Nächstes Ziel: Backup/Restore
-auf dem Host final verifizieren, danach **Phase 4** (Import bestehender
-`journal.txt`-Dateien und Connector-Setup).
+Fail2Ban und WAL-sicherem SQLite-Betrieb. Das Borg-Backup inklusive
+Restore-Test ist verifiziert. Nächstes Ziel: **Phase 4** (Import
+bestehender `journal.txt`-Dateien und Connector-Setup).
 
 ## Phasen-Plan
 
@@ -170,6 +170,29 @@ sucht per FTS5, prüft Auth-Gate und Token-Scope und feuert Negativtests
 sammelt Einträge an – ggf. `data/bramble.db` löschen für einen
 sauberen Lauf.
 
+## Legacy-Journals importieren
+
+`scripts/import_journal_txt.py` importiert bestehende
+`docs/journal.txt`-Dateien direkt in die SQLite-DB. Der Default ist ein
+Dry-Run; geschrieben wird nur mit `--execute`.
+
+```bash
+python scripts/import_journal_txt.py \
+    --project bramble \
+    --source docs/journal.txt \
+    --db data/bramble.db
+
+python scripts/import_journal_txt.py \
+    --project bramble \
+    --source docs/journal.txt \
+    --db data/bramble.db \
+    --execute
+```
+
+Der Import bewahrt das Journal-Datum, soweit es eindeutig parsebar ist.
+Datumseinträge ohne Uhrzeit werden auf `12:00:00+00:00` gesetzt.
+Identische Einträge werden im Execute-Modus übersprungen.
+
 ## Repo-Struktur
 
 ```
@@ -183,6 +206,7 @@ Bramble/
 │   └── fail2ban/        # Fail2Ban-Filter/Jail
 ├── scripts/
 │   ├── gen_token.py     # Projekt-Token erzeugen/rotieren
+│   ├── import_journal_txt.py
 │   ├── init_db.py       # Migration / DB-Bootstrap
 │   └── smoke_http.py    # manuelles HTTP-Smoke-Skript
 ├── src/bramble/         # Quellcode (eine Klasse pro Datei)
