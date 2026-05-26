@@ -1,11 +1,15 @@
 # Phase 3 – Deployment & Härtung
 
-Status: **Entwurf – entscheidungsreif** (2026-05-18). Umsetzung noch
-nicht begonnen.
+Status: **Abgeschlossen** (2026-05-26). Phase-3-Code wurde mit PR #4
+nach `main` gemergt; der Host-Deploy auf
+`journal.last-strawberry.com` ist erfolgt. Das WAL-sichere
+Borg-Backup ist als kurzes Folge-Arbeitspaket im Runbook konkretisiert
+und muss auf dem Host noch final per Restore-Test verifiziert werden.
 
-Planungs-Entwurf. Die offenen Fragen wurden am 2026-05-18 mit dem
-Nutzer geklärt und bestätigt – alle Designentscheidungen in Abschnitt 2
-sind damit fix. Abschnitt 8 protokolliert die Entscheidungen.
+Dieser Planungs-Entwurf wurde am 2026-05-18 mit dem Nutzer geklärt,
+anschließend umgesetzt und beim Host-Deploy am 2026-05-26 verifiziert.
+Abschnitt 2 dokumentiert die fixen Designentscheidungen; Abschnitt 8
+protokolliert die ursprünglichen Klärungen.
 
 ## 1. Ziel von Phase 3
 

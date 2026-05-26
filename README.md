@@ -11,10 +11,12 @@ ablegt und projektübergreifend durchsuchbar macht.
 
 ## Status
 
-In aktiver Entwicklung. Aktuell: **Phase 2 – lokal lauffähig** ist
-abgeschlossen. Nächstes Ziel: **Phase 3** (Deployment auf
-`journal.last-strawberry.com` mit Bearer-Token-Auth, Rate-Limit,
-Fail2Ban).
+In aktiver Entwicklung. **Phase 3 – Deployment & Härtung** ist
+abgeschlossen: Bramble läuft als systemd-Service hinter Plesk/Nginx auf
+`journal.last-strawberry.com`, mit Bearer-Token-Auth, Rate-Limit,
+Fail2Ban und WAL-sicherem SQLite-Betrieb. Nächstes Ziel: Backup/Restore
+auf dem Host final verifizieren, danach **Phase 4** (Import bestehender
+`journal.txt`-Dateien und Connector-Setup).
 
 ## Phasen-Plan
 
@@ -24,7 +26,7 @@ Fail2Ban).
    lokal lauffähig. ✅
 3. **Phase 3** – Deployment auf `journal.last-strawberry.com`
    (Plesk/Ubuntu), systemd, Nginx-Reverse-Proxy, Bearer-Token-Auth,
-   Rate-Limit, Fail2Ban.
+   Rate-Limit, Fail2Ban. ✅
 4. **Phase 4** – Import bestehender `journal.txt`-Dateien,
    Connector-Setup in Claude.ai und Claude Code.
 5. **Phase 5** – Migration aller Projekt-System-Prompts auf die
@@ -102,12 +104,18 @@ Nach `pip install -e .` ist der Console-Script-Entry-Point
 bramble-server --transport stdio
 ```
 
-### HTTP-Transport (Vorbereitung für Phase 3, lokal zum Testen)
+### HTTP-Transport (authentifiziert)
 
 ```bash
 bramble-server --transport http --host 127.0.0.1 --port 8765 \
-    --log-level INFO
+    --tokens-file ./secrets/tokens.json --log-level INFO
 ```
+
+Der HTTP-Transport ist authentifiziert: jeder Tool-Call braucht ein
+`Authorization: Bearer <token>`-Header. Tokens werden mit
+`scripts/gen_token.py <projekt>` erzeugt. `journal_append` ist an das
+Projekt des Tokens gebunden; Lesen und Suchen bleiben
+projektübergreifend.
 
 ### Konfiguration
 
@@ -120,6 +128,9 @@ Priorität: CLI-Argument > Umgebungsvariable > Default.
 | `--host HOST` | `BRAMBLE_HOST` | `127.0.0.1` |
 | `--port PORT` | `BRAMBLE_PORT` | `8765` |
 | `--log-level LEVEL` | `BRAMBLE_LOG_LEVEL` | `INFO` |
+| `--tokens-file PATH` | `BRAMBLE_TOKENS_FILE` | `./secrets/tokens.json` |
+| `--rate-limit-per-token N` | `BRAMBLE_RATE_LIMIT_PER_TOKEN` | `60` |
+| `--rate-limit-per-ip N` | `BRAMBLE_RATE_LIMIT_PER_IP` | `120` |
 
 Logs werden als JSON auf stderr geschrieben (stdout ist beim stdio-Transport
 für das MCP-Protokoll reserviert).
@@ -144,18 +155,20 @@ laufenden HTTP-Server (kein Teil der pytest-Suite).
 ```powershell
 # Terminal 1
 bramble-server --transport http --host 127.0.0.1 --port 8765 \
-    --log-level INFO
+    --tokens-file .\secrets\tokens.json --log-level INFO
 
 # Terminal 2
-python scripts\smoke_http.py
+python scripts\smoke_http.py --token <bramble-token>
 # oder gegen einen anderen Endpoint:
-python scripts\smoke_http.py --url http://127.0.0.1:9000/mcp/
+python scripts\smoke_http.py --url http://127.0.0.1:9000/mcp/ \
+    --token <bramble-token>
 ```
 
-Der Smoke-Test schreibt drei Einträge in die echte DB, liest zurück,
-sucht per FTS5, prüft Projekt-Isolation und feuert zwei Negativtests
-(unbekannter Status, non-kebab Projektname). Mehrfaches Ausführen sammelt
-Einträge an – ggf. `data/bramble.db` löschen für einen sauberen Lauf.
+Der Smoke-Test schreibt zwei Einträge in die echte DB, liest zurück,
+sucht per FTS5, prüft Auth-Gate und Token-Scope und feuert Negativtests
+(unbekannter Status, non-kebab Projektname). Mehrfaches Ausführen
+sammelt Einträge an – ggf. `data/bramble.db` löschen für einen
+sauberen Lauf.
 
 ## Repo-Struktur
 
@@ -164,9 +177,14 @@ Bramble/
 ├── docs/
 │   ├── concepts/        # Phasen-Konzepte
 │   └── journal.txt      # eigenes Journal (bis Phase 4)
+├── deploy/
+│   ├── bramble-backup-snapshot.sh
+│   ├── bramble.service  # systemd-Unit
+│   └── fail2ban/        # Fail2Ban-Filter/Jail
 ├── scripts/
+│   ├── gen_token.py     # Projekt-Token erzeugen/rotieren
 │   ├── init_db.py       # Migration / DB-Bootstrap
-│   └── smoke_http.py    # manuelles End-to-End-Smoke-Skript
+│   └── smoke_http.py    # manuelles HTTP-Smoke-Skript
 ├── src/bramble/         # Quellcode (eine Klasse pro Datei)
 └── tests/               # pytest-Tests
 ```

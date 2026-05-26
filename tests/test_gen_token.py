@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import stat
 from pathlib import Path
 
@@ -75,6 +76,8 @@ class TestMain:
         assert data["bramble"] in out
 
     def test_token_file_is_owner_only(self, tmp_path: Path) -> None:
+        if os.name == "nt":
+            pytest.skip("POSIX owner-only mode bits are not reliable on Windows")
         path = tmp_path / "secrets" / "tokens.json"
         gen_token.main(["bramble", "--tokens-file", str(path)])
         assert stat.S_IMODE(path.stat().st_mode) == 0o600

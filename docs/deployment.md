@@ -35,7 +35,6 @@ Ein dedizierter, nicht-privilegierter Service-User (Entscheidung H):
 
 ```sh
 useradd --system --home-dir /opt/bramble --shell /usr/sbin/nologin bramble
-mkdir -p /opt/bramble/data /opt/bramble/secrets
 ```
 
 Verzeichnis-Layout unter `/opt/bramble`:
@@ -51,11 +50,13 @@ Verzeichnis-Layout unter `/opt/bramble`:
 
 ## 2. Code und virtuelle Umgebung
 
-Repository nach `/opt/bramble` bringen (klonen oder kopieren), z. B.:
+Repository nach `/opt/bramble` bringen (klonen oder kopieren). Bei
+privatem Repo bevorzugt per SSH-Deploy-Key:
 
 ```sh
-git clone https://github.com/leratos/Bramble.git /opt/bramble
+git clone git@github.com:leratos/Bramble.git /opt/bramble
 cd /opt/bramble
+mkdir -p data secrets
 python3 -m venv .venv
 .venv/bin/pip install .
 ```
@@ -69,6 +70,7 @@ Abschließend gehören alle Dateien dem Service-User:
 ```sh
 chown -R bramble:bramble /opt/bramble
 chmod 700 /opt/bramble/secrets
+chmod 750 /opt/bramble/data
 ```
 
 ---
@@ -84,6 +86,13 @@ sudo -u bramble BRAMBLE_DB_PATH=/opt/bramble/data/bramble.db \
 **WAL-Mode** (Entscheidung I). WAL bleibt im DB-Header gespeichert –
 einmalig genügt. Das Script prüft außerdem die FTS5-Verfügbarkeit und
 bricht mit Exit-Code 2 ab, falls FTS5 fehlt.
+
+Danach die DB-Datei auf owner/group-readable beschränken:
+
+```sh
+chmod 640 /opt/bramble/data/bramble.db
+chown bramble:bramble /opt/bramble/data/bramble.db
+```
 
 ---
 
@@ -129,6 +138,11 @@ Der Prozess bindet laut Unit nur an `127.0.0.1:8765`; sämtliche
 Konfiguration kommt aus den `Environment=`-Zeilen der Unit
 (`BRAMBLE_*`-Variablen, aufgelöst über `CLI > Env > Default`). Logs
 gehen als JSON auf stderr → journald.
+
+Die Unit setzt zusätzlich `FASTMCP_ENV_FILE=/opt/bramble/nonexistent.env`.
+Das verhindert, dass FastMCP bzw. `pydantic-settings` versehentlich
+eine `.env` aus dem WorkingDirectory lädt und damit Brambles explizite
+systemd-Konfiguration überlagert.
 
 ---
 
@@ -193,27 +207,89 @@ inkonsistent sein (Entscheidung J). Das bestehende Borg-Script bekommt
 daher einen **Pre-Backup-Schritt**, der einen konsistenten Snapshot
 zieht; Borg sichert dann den Snapshot, nicht die Live-Datei.
 
-Einmalig ein Staging-Verzeichnis anlegen:
+Einmalig das Snapshot-Script ausführbar machen und ein Staging-
+Verzeichnis anlegen:
 
 ```sh
-mkdir -p /opt/bramble/backup-staging
-chown bramble:bramble /opt/bramble/backup-staging
+chmod 755 /opt/bramble/deploy/bramble-backup-snapshot.sh
+install -d -o bramble -g bramble -m 0750 /opt/bramble/backup-staging
 ```
 
 Im Borg-Script **vor** dem `borg create`-Aufruf einfügen:
 
 ```sh
 # Konsistenter Snapshot der (WAL-)Live-DB via SQLite-Online-Backup-API.
-sqlite3 /opt/bramble/data/bramble.db \
-    ".backup '/opt/bramble/backup-staging/bramble.db'"
+BRAMBLE_SNAPSHOT=$(/opt/bramble/deploy/bramble-backup-snapshot.sh)
 ```
 
-Im `borg create`-Aufruf statt der Live-DB den Snapshot sichern, also
-`/opt/bramble/backup-staging/bramble.db` (statt
-`/opt/bramble/data/bramble.db`) in die Pfadliste aufnehmen. Die
-WAL-Sidecars (`bramble.db-wal`, `bramble.db-shm`) werden **nicht**
-mitgesichert – der `.backup`-Snapshot ist bereits ein vollständiger,
-in sich konsistenter Stand.
+Im `borg create`-Aufruf statt der Live-DB den Snapshot sichern:
+`"$BRAMBLE_SNAPSHOT"` bzw. `/opt/bramble/backup-staging/bramble.db`
+statt `/opt/bramble/data/bramble.db`. Die WAL-Sidecars
+(`bramble.db-wal`, `bramble.db-shm`) werden **nicht** mitgesichert –
+der `.backup`-Snapshot ist bereits ein vollständiger, in sich
+konsistenter Stand.
+
+Zusätzlich sollte die Token-Datei in das verschlüsselte Borg-Backup:
+`/opt/bramble/secrets/tokens.json`. Ohne sie bleiben die Journal-Daten
+zwar restaurierbar, aber alle eingerichteten Connector-Tokens müssten
+nach einem Restore rotiert und in den Clients neu eingetragen werden.
+
+Nach dem ersten Backup einen Restore-Test gegen den frisch erzeugten
+Archivstand machen:
+
+```sh
+mkdir -p /tmp/bramble-restore-test
+borg extract --stdout <repo>::<archive> opt/bramble/backup-staging/bramble.db \
+    > /tmp/bramble-restore-test/bramble.db
+sqlite3 /tmp/bramble-restore-test/bramble.db "PRAGMA integrity_check;"
+sqlite3 /tmp/bramble-restore-test/bramble.db \
+    "SELECT COUNT(*) FROM journal_entries;"
+sqlite3 /tmp/bramble-restore-test/bramble.db \
+    "SELECT COUNT(*) FROM journal_fts;"
+rm -rf /tmp/bramble-restore-test
+```
+
+Erwartung: `integrity_check` gibt `ok` aus; die beiden Counts laufen
+ohne Fehler. Die Zahlen müssen nicht identisch sein, weil FTS5 intern
+mehrere Segment-/Indexzeilen verwaltet.
+
+### Einbau in das aktuelle `/usr/local/bin/borg-backup.sh`
+
+Stand 2026-05-26 läuft auf dem Host ein zentrales Script mit
+`DUMP_DIR="/var/backups/db-dumps"` und einem einzigen `borg create`.
+Für genau dieses Script:
+
+1. Im Konfigurationsblock nach den Synapse-Variablen ergänzen:
+
+```sh
+# Bramble (SQLite WAL)
+BRAMBLE_SNAPSHOT=""
+BRAMBLE_TOKENS="/opt/bramble/secrets/tokens.json"
+```
+
+2. Nach dem Synapse-PostgreSQL-Dump und vor
+   `log "DB-Dumps abgeschlossen:"` ergänzen:
+
+```sh
+log "SQLite Snapshot: bramble..."
+BRAMBLE_SNAPSHOT=$(/opt/bramble/deploy/bramble-backup-snapshot.sh)
+log "Bramble Snapshot: ${BRAMBLE_SNAPSHOT}"
+```
+
+3. Im `borg create`-Pfadblock ergänzen:
+
+```sh
+    "$BRAMBLE_SNAPSHOT"                                \
+    "$BRAMBLE_TOKENS"                                  \
+    /etc/systemd/system/bramble.service                \
+    /etc/fail2ban/filter.d/bramble.conf                \
+    /etc/fail2ban/jail.d/bramble.conf                  \
+```
+
+Die Live-Datei `/opt/bramble/data/bramble.db` bleibt bewusst **nicht**
+in der Borg-Pfadliste. Auch `/opt/bramble/` als Ganzes sollte nicht
+gesichert werden, weil dadurch die virtuelle Umgebung unter
+`/opt/bramble/.venv/` unnötig ins Backup wandern würde.
 
 ---
 

@@ -490,3 +490,69 @@ Offene Punkte:
 Naechster Schritt: Phase 4 – Import bestehender journal.txt
 (Elder-Berry), Connector-Setup in Claude.ai + Claude Code. Davor
 Schritt 8 (Backup) als kurzes Folge-Arbeitspaket abschliessen.
+
+## In Arbeit: Backup-Folgearbeit und Phase-4-Vorbereitung
+Datum: 2026-05-26 (UTC)
+Branch: main
+
+Ausloeser: Projektanalyse nach Phase-3-Host-Deploy. Reihenfolge der
+naechsten Schritte festgelegt: erst Backup/Restore, dann Doku-Drift
+bereinigen, dann Phase-4-Import und Connector-Setup vorbereiten.
+
+Repo-seitig umgesetzt:
+- deploy/bramble-backup-snapshot.sh ergaenzt. Das Script erzeugt per
+  sqlite3 ".backup" einen konsistenten Snapshot der aktiven WAL-DB,
+  prueft den Snapshot mit PRAGMA integrity_check und gibt den Pfad fuer
+  das zentrale Borg-Script aus.
+- docs/deployment.md Schritt 8 konkretisiert: Snapshot-Script vor
+  borg create aufrufen, Snapshot statt Live-DB sichern, tokens.json in
+  das verschluesselte Borg-Backup aufnehmen, Restore-Test dokumentiert.
+- docs/deployment.md mit den Host-Abweichungen aus dem Deploy
+  abgeglichen: erst git clone, dann data/secrets anlegen; SSH-Deploy-
+  Key als Standardbeispiel; DB-Datei auf 640; FASTMCP_ENV_FILE-Hinweis
+  zur systemd-Unit dokumentiert.
+- README.md auf Phase-3-Ist-Stand gebracht: Status, Phase-Plan,
+  HTTP-Auth, neue Env/CLI-Optionen, token-faehiger Smoke-Test und
+  aktualisierte Repo-Struktur.
+- requirements.txt korrigiert: FastMCP und python-json-logger stehen
+  jetzt auch dort, pyproject.toml bleibt Source of Truth.
+- tests/test_gen_token.py plattformbewusst gemacht: POSIX-0600 fuer
+  tokens.json wird weiter auf Linux/Unix geprueft, unter Windows aber
+  geskippt, weil chmod dort keine POSIX-Mode-Bits garantiert.
+- docs/concepts/phase-3-deployment.md Status auf abgeschlossen
+  aktualisiert.
+- docs/concepts/phase-4-import-and-connectors.md angelegt:
+  Import-Reihenfolge, Dry-Run-Anforderungen, Mindest-Verifikation und
+  Connector-Setup.
+- docs/concepts/maintenance-backlog.md angelegt; FastMCP-PyPI-
+  Versionscheck beim Serverstart als spaeteres Haertungsarbeitspaket
+  erfasst.
+
+Offen auf dem Host:
+- deploy/bramble-backup-snapshot.sh nach /opt/bramble holen, chmod 755
+  setzen und im zentralen /usr/local/bin/borg-backup.sh vor borg create
+  aufrufen.
+- /opt/bramble/backup-staging/bramble.db und
+  /opt/bramble/secrets/tokens.json in die Borg-Pfadliste aufnehmen.
+- Einen echten Restore-Test gegen das naechste Borg-Archiv machen.
+
+Hinweis:
+- Der alte Journal-Hinweis, FASTMCP_ENV_FILE sei nur auf dem Host und
+  noch nicht im Repo vorhanden, ist durch deploy/bramble.service
+  erledigt.
+
+Verifikation:
+- .\.venv\Scripts\python -m pytest: 241 passed, 1 skipped
+  (Windows-spezifischer POSIX-Mode-Bit-Test).
+
+Nachtrag Borg-Script:
+- Nutzer hat das produktive /usr/local/bin/borg-backup.sh geteilt.
+  Es sichert aktuell Nextcloud/MariaDB, Synapse/PostgreSQL, $DUMP_DIR,
+  diverse /etc- und /opt-Pfade, aber noch nichts Bramble-spezifisches.
+- docs/deployment.md Schritt 8 um einen konkreten Einbau fuer genau
+  dieses Script ergaenzt: BRAMBLE_SNAPSHOT/BRAMBLE_TOKENS-Variablen,
+  Snapshot-Aufruf nach dem Synapse-Dump und Pfadblock fuer Snapshot,
+  tokens.json, bramble.service und Fail2Ban-Konfigs im borg create.
+- Bewusst NICHT empfohlen: /opt/bramble/ komplett sichern, weil sonst
+  die venv mit ins Backup wandert. Die Live-DB bleibt ebenfalls aus der
+  Pfadliste; gesichert wird nur der konsistente Snapshot.

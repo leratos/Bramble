@@ -1,3 +1,6 @@
-# Bramble runtime requirements (Phase 1)
-# Phase 1: keine externen Runtime-Deps – nur Stdlib (sqlite3, dataclasses, datetime).
-# FastMCP wird in Phase 2 ergänzt.
+# Bramble runtime requirements.
+#
+# pyproject.toml is the packaging source of truth. This file exists for
+# simple deployment/install flows that still expect requirements.txt.
+fastmcp>=3,<4
+python-json-logger>=4,<5
