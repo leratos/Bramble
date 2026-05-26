@@ -30,6 +30,7 @@ Environment=BRAMBLE_LOG_LEVEL=INFO
 Environment=BRAMBLE_TOKENS_FILE=/opt/bramble/secrets/tokens.json
 Environment=BRAMBLE_RATE_LIMIT_PER_TOKEN=60
 Environment=BRAMBLE_RATE_LIMIT_PER_IP=120
+Environment=FASTMCP_ENV_FILE=/opt/bramble/nonexistent.env
 
 # Hardening. The process only ever needs to read its code, venv and
 # token file and to write the SQLite database (+ its WAL sidecars);

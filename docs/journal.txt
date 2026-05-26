@@ -404,3 +404,89 @@ Offen / naechster Schritt:
   Deployment-Artefakte sind Linux-only und auf dem Entwicklungs-
   rechner nicht voll testbar.
 - Danach Phase 4: Daten-Import und Connector-Setup.
+
+## Abgeschlossen: Phase 3 – Host-Deploy auf journal.last-strawberry.com
+Datum: 2026-05-26 (UTC)
+Branch: main (Code seit PR #4 / Commit db18a59 gemergt;
+nginx-Fix als Commit 5772c01 nachgezogen)
+
+Runbook docs/deployment.md auf dem Strato-Rootserver (Ubuntu 24.04,
+Plesk) durchgearbeitet. Service laeuft, ist gehaertet und unter
+https://journal.last-strawberry.com/mcp/ erreichbar.
+
+Erledigt: Runbook-Schritte 1-7 und 9.
+Vertagt:  Schritt 8 (Backup) – siehe offene Punkte.
+
+Ausgefuehrt:
+- Schritt 1: System-User 'bramble' (UID 983, nologin), /opt/bramble.
+- Schritt 2: Repo via SSH-Deploy-Key geklont (privates Repo), venv
+  mit Python 3.12.3, 'pip install .' (fastmcp 3.3.1,
+  python-json-logger 4.1.0). Lazy-Import-Bugfix verifiziert: 'import
+  bramble' zieht fastmcp nicht eager.
+- Schritt 3: init_db.py -> Schema + FTS5 + WAL-Mode (journal_mode=wal
+  bestaetigt).
+- Schritt 4: gen_token.py fuer Projekt 'bramble', tokens.json (600).
+  Nur 'bramble' angelegt; elder-berry/bull-berry/berry-gym folgen
+  projektweise in Phase 4/5.
+- Schritt 5: systemd-Unit installiert, Service active (running),
+  bindet nur 127.0.0.1:8765.
+- Schritt 6: Plesk nginx-Direktiven eingetragen; Endpunkt extern
+  erreichbar, Smoke gruen.
+- Schritt 7: Fail2Ban-Jail 'bramble' aktiv (backend=systemd),
+  failregex gegen echtes Journal verifiziert (3/3 matched),
+  IPv6-Ban-Faehigkeit per Test-Ban geprueft.
+- Schritt 9: smoke_http.py gegen die oeffentliche URL – alle 8
+  Checks gruen (Tool-Discovery, Auth-Gate, Append x2, Read,
+  FTS5-Search, Token-Scope, list_projects, 2 Negativtests).
+
+Runbook-Abweichungen / -Patches (Runbook nach diesem Eintrag
+korrigieren):
+- Schritt 1/2: Reihenfolge getauscht – erst 'git clone', dann
+  'mkdir data/ secrets/'. git clone verweigert nicht-leeres Ziel.
+- Schritt 2: Klon via SSH-Deploy-Key statt der im Runbook
+  genannten HTTPS-URL (Repo ist privat).
+- Schritt 5: Unit um 'Environment=FASTMCP_ENV_FILE=
+  /opt/bramble/nonexistent.env' ergaenzt. fastmcp/pydantic-settings
+  liest sonst eine .env aus dem WorkingDirectory – stille
+  Konfig-Einfallstuer. OFFEN: Diese Zeile ist bisher NUR in
+  /etc/systemd/system/bramble.service, noch NICHT im versionierten
+  deploy/bramble.service – muss lokal eingepflegt und committet
+  werden.
+- Schritt 3: Runbook spezifiziert die Rechte der DB-Datei nicht;
+  bramble.db auf 640 gesetzt.
+
+Technische Schuld:
+- fastmcp 3.3.1 macht beim Server-Start einen ausgehenden
+  HTTPS-Request an pypi.org (Versions-Check). Einmalig pro Start,
+  nicht blockierend, kein Sicherheitsloch im Threat-Modell –
+  widerspricht aber dem self-hosted-Anspruch. Optionen fuer einen
+  spaeteren Cleanup: fastmcp-seitiger Schalter, oder Egress per
+  systemd IPAddressDeny=any + IPAddressAllow=127.0.0.1 (braucht
+  eigenen Test).
+
+Betriebs-Caveats:
+- smoke_http.py erzeugt pro Lauf ~3 auth_failed-Events. Bei
+  maxretry=3 kann ein einziger Smoke-Lauf die eigene IP sperren.
+  Entbannen: 'fail2ban-client set bramble unbanip <IP>' (SSH bleibt
+  erreichbar, Jail betrifft nur http,https).
+- Bei Nutzung ueber NordVPN: Fail2Ban sperrt die Shared-Exit-IP;
+  Selbst-Aussperrung moeglich, fremde Nutzer derselben Exit-IP
+  zaehlen auf maxretry mit.
+- Fail2Ban-Jail matcht nur auth_failed, NICHT die 404-Bot-Scans
+  (/rdweb/, /Dr0v o.ae.). Bewusste Konzept-Entscheidung; bekannte
+  Grenze. Erweiterung (z.B. 404-Flood-Filter) optional fuer spaeter.
+
+Offene Punkte:
+- Schritt 8 (Backup) bewusst vertagt. Bramble ist aktuell NICHT im
+  Backup: das zentrale /usr/local/bin/borg-backup.sh sichert eine
+  kuratierte Pfadliste, /opt/bramble ist nicht enthalten. Zu
+  entscheiden: zentrales Script erweitern (Runbook-Weg, dritter
+  Dump-Block mit 'sqlite3 .backup' + Pfade) ODER eigenes
+  Bramble-Backup nach dem Muster von Bull-Berry (eigener
+  systemd-Timer + borg.env). Eigenes Arbeitspaket, mit Test-Restore.
+- 2 Smoke-Test-Eintraege in bramble.db (id=1 notiz, id=2 bugfix).
+  Beim Phase-4-Import von Brambles journal.txt mitbereinigen.
+
+Naechster Schritt: Phase 4 – Import bestehender journal.txt
+(Elder-Berry), Connector-Setup in Claude.ai + Claude Code. Davor
+Schritt 8 (Backup) als kurzes Folge-Arbeitspaket abschliessen.
