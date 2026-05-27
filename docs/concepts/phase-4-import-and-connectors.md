@@ -1,12 +1,15 @@
 # Phase 4 – Import & Connector-Setup
 
 Status: **In Arbeit** (2026-05-26). Backup/Restore ist verifiziert;
-der Importer für legacy `journal.txt`-Dateien ist als erstes
-Phase-4-Arbeitspaket umgesetzt.
+der Importer für legacy `journal.txt`-Dateien ist umgesetzt; Brambles
+eigenes Journal ist in die Produktiv-DB importiert. Codex ist als erster
+Bramble-MCP-Client angebunden.
 
-Phase 4 macht Bramble selbst zum produktiv genutzten Journal: bestehende
-`journal.txt`-Dateien werden importiert, anschließend schreiben Claude.ai
-und Claude Code über die MCP-Tools direkt in die zentrale Datenbank.
+Phase 4 macht Bramble selbst zum produktiv genutzten Journal:
+Zuerst werden MCP-fähige KI-Clients für das Projekt `bramble`
+angebunden, dann werden bestehende `journal.txt`-Dateien importiert,
+anschließend schreiben Claude.ai, Claude Code, Codex und andere Clients
+über die MCP-Tools direkt in die zentrale Datenbank.
 
 ## 1. Voraussetzung
 
@@ -25,11 +28,13 @@ Projekt wird deshalb weiterhin erst ein Dry-Run gemacht.
 
 ## 2. Import-Reihenfolge
 
-1. Brambles eigenes [docs/journal.txt](../journal.txt) importieren.
-2. Die zwei Smoke-Test-Einträge in der Produktiv-DB prüfen und entweder
-   bewusst behalten oder vor dem Import manuell entfernen.
-3. Elder-Berry importieren.
-4. Weitere Projekte projektweise ergänzen: Bull-Berry, Berry-Gym,
+1. Brambles eigenes [docs/journal.txt](../journal.txt) importieren. ✅
+2. Die zwei Smoke-Test-Einträge in der Produktiv-DB prüfen und vor dem
+   Import entfernen. ✅
+3. Bramble als Journal-Tool für KI-Clients konfigurieren. ✅
+4. Elder-Berry importieren.
+   **Aktueller Schritt.**
+5. Weitere Projekte projektweise ergänzen: Bull-Berry, Berry-Gym,
    Last-Strawberry und spätere Repos.
 
 Für jedes Projekt wird vorher ein eigenes Token erzeugt:
@@ -109,7 +114,11 @@ Außerdem über MCP prüfen:
 
 ## 5. Connector-Setup
 
-Claude.ai und Claude Code bekommen jeweils den HTTP-Endpunkt:
+Allgemeine Anleitung, Arbeitsregeln und System-Prompt-Baustein:
+[docs/ai-client-setup.md](../ai-client-setup.md).
+
+Claude.ai, Claude Code, Codex und andere MCP-fähige Clients bekommen
+jeweils den HTTP-Endpunkt:
 
 ```text
 https://journal.last-strawberry.com/mcp/
@@ -131,9 +140,19 @@ Wichtig für System-Prompts ab Phase 5:
 * Korrekturen werden als neuer `bugfix`- oder `notiz`-Eintrag
   geschrieben; es gibt bewusst kein Update/Delete-Tool.
 
+Für Bramble selbst gilt schon in Phase 4:
+
+* Projekt: `bramble`.
+* Zu Beginn relevanter Arbeit `journal_read(project="bramble", n=20)`.
+* Bei Bedarf Suche per `journal_search(project="bramble", query=...)`.
+* Fortschritt, Entscheidungen und Abschlüsse per `journal_append`.
+* Anpassungen/Korrekturen immer append-only als neuer `bugfix`- oder
+  `notiz`-Eintrag mit Referenz auf den alten Eintrag.
+* Operative Repo-Regeln stehen in [AGENTS.md](../../AGENTS.md).
+* `docs/journal.txt` bleibt nur historische Importquelle und wird nicht
+  mehr fuer neue Eintraege verwendet.
+
 ## 6. Offene Entscheidungen
 
 * Umgang mit sehr alten oder handformatierten Journal-Abschnitten, die
   kein klares `Datum:` haben.
-* Ob Smoke-Test-Einträge vor Brambles Eigenimport gelöscht werden oder
-  als Betriebsnachweis erhalten bleiben.

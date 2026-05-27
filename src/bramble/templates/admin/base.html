@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Bramble Admin{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/admin.css') }}">
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="{{ url_for('dashboard') }}" aria-label="Bramble Admin Dashboard">
+        <span class="brand-mark" aria-hidden="true">B</span>
+        <span>Bramble Admin</span>
+      </a>
+      <nav aria-label="Hauptnavigation">
+        <a href="{{ url_for('dashboard') }}">Dashboard</a>
+        <a href="{{ url_for('projects') }}">Projekte</a>
+      </nav>
+      <form class="logout-form" method="post" action="{{ url_for('logout') }}">
+        <span>{{ actor }}</span>
+        <button type="submit">Logout</button>
+      </form>
+    </header>
+
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Projektliste">
+        <div class="sidebar-head">
+          <h2>Projekte</h2>
+          <span>{{ projects|length }}</span>
+        </div>
+        <nav class="project-nav">
+          {% for project in projects %}
+            <a
+              href="{{ url_for('project_detail', project=project.name) }}"
+              class="{% if active_project == project.name %}active{% endif %}"
+            >
+              <span class="project-name">{{ project.name }}</span>
+              <span class="project-meta">
+                {{ project.entry_count }} Eintraege
+              </span>
+            </a>
+          {% else %}
+            <p class="empty-state">Noch keine Projekte.</p>
+          {% endfor %}
+        </nav>
+      </aside>
+
+      <main class="content">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </body>
+</html>

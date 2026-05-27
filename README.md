@@ -18,6 +18,10 @@ Fail2Ban und WAL-sicherem SQLite-Betrieb. Das Borg-Backup inklusive
 Restore-Test ist verifiziert. Nächstes Ziel: **Phase 4** (Import
 bestehender `journal.txt`-Dateien und Connector-Setup).
 
+Ab Phase 4 ist Brambles aktives Projektgedaechtnis das MCP-Journal
+selbst. `docs/journal.txt` bleibt nur als historische Importquelle im
+Repo und wird nicht mehr fuer neue Eintraege verwendet.
+
 ## Phasen-Plan
 
 1. **Phase 1** – Repo-Setup, DB-Schema, Core-Klassen (JournalEntry,
@@ -135,6 +139,31 @@ Priorität: CLI-Argument > Umgebungsvariable > Default.
 Logs werden als JSON auf stderr geschrieben (stdout ist beim stdio-Transport
 für das MCP-Protokoll reserviert).
 
+### Admin-UI (Phase 4b read-only MVP)
+
+Der separate Admin-Server rendert Starlette/Jinja2-Views und bindet per
+Default nur an `127.0.0.1:8770`. Zugriff ist fuer den Betrieb per
+SSH-Tunnel gedacht, nicht ueber einen oeffentlichen Nginx/Plesk-Pfad.
+
+Vor dem Start muss ein Argon2id-Secret existieren. Es gibt bewusst kein
+Default-Passwort:
+
+```bash
+python scripts/gen_admin_secret.py --output ./secrets/admin-ui.json
+```
+
+Danach:
+
+```bash
+bramble-admin --db ./data/bramble.db \
+    --admin-secret-file ./secrets/admin-ui.json
+```
+
+Die MVP-Views sind read-only: Dashboard, Projektliste, Projektansicht
+und Projektsuche. Login-Sessions bleiben serverseitig, das Cookie ist
+`HttpOnly` und `SameSite=Strict`; fehlende oder ungueltige Secrets
+brechen den Start ab.
+
 ### DB ohne Server vorbereiten
 
 ```bash
@@ -172,6 +201,10 @@ sauberen Lauf.
 
 ## Legacy-Journals importieren
 
+`docs/journal.txt` ist fuer Bramble selbst bereits importiert und wird
+nicht weiter gepflegt. Dieser Abschnitt beschreibt nur den Import alter
+Textjournals aus Bramble oder anderen Projekten.
+
 `scripts/import_journal_txt.py` importiert bestehende
 `docs/journal.txt`-Dateien direkt in die SQLite-DB. Der Default ist ein
 Dry-Run; geschrieben wird nur mit `--execute`.
@@ -193,13 +226,24 @@ Der Import bewahrt das Journal-Datum, soweit es eindeutig parsebar ist.
 Datumseinträge ohne Uhrzeit werden auf `12:00:00+00:00` gesetzt.
 Identische Einträge werden im Execute-Modus übersprungen.
 
+## KI-Clients anbinden
+
+MCP-fähige KI-Clients verbinden sich über den öffentlichen HTTP-
+Endpunkt und ein projektbezogenes Bearer-Token. Arbeitsregeln,
+Korrekturmodell und ein System-Prompt-Baustein stehen in
+[docs/ai-client-setup.md](docs/ai-client-setup.md).
+
+Fuer dieses Repo stehen die operativen Agentenregeln zusaetzlich in
+[AGENTS.md](AGENTS.md).
+
 ## Repo-Struktur
 
 ```
 Bramble/
 ├── docs/
 │   ├── concepts/        # Phasen-Konzepte
-│   └── journal.txt      # eigenes Journal (bis Phase 4)
+│   ├── ai-client-setup.md
+│   └── journal.txt      # Legacy-Importquelle; keine neuen Eintraege
 ├── deploy/
 │   ├── bramble-backup-snapshot.sh
 │   ├── bramble.service  # systemd-Unit

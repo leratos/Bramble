@@ -1,0 +1,352 @@
+:root {
+  color-scheme: light;
+  --bg: #f5f6f3;
+  --surface: #ffffff;
+  --surface-strong: #ecf1ea;
+  --text: #18211d;
+  --muted: #617064;
+  --line: #d8ded5;
+  --accent: #256d46;
+  --accent-strong: #16452c;
+  --warn-bg: #fff4d7;
+  --warn-text: #6d4d00;
+  --focus: #0f766e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--accent-strong);
+  text-decoration: underline;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #ffffff;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0.65rem 0.9rem;
+}
+
+button:hover {
+  background: var(--accent-strong);
+}
+
+input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 0.65rem 0.75rem;
+}
+
+input:focus,
+button:focus,
+a:focus {
+  outline: 3px solid color-mix(in srgb, var(--focus) 35%, transparent);
+  outline-offset: 2px;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 1rem;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.96);
+  padding: 0.75rem 1rem;
+}
+
+.brand,
+.brand-block {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--text);
+  font-weight: 800;
+}
+
+.brand-mark {
+  display: inline-grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 900;
+}
+
+.topbar nav {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.logout-form {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.logout-form span {
+  color: var(--muted);
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: minmax(16rem, 25vw) 1fr;
+  min-height: calc(100vh - 58px);
+}
+
+.sidebar {
+  border-right: 1px solid var(--line);
+  background: var(--surface-strong);
+  padding: 1rem;
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.8rem;
+}
+
+.sidebar h2,
+.entry-section h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.project-nav {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.project-nav a {
+  display: grid;
+  gap: 0.1rem;
+  border-radius: 6px;
+  color: var(--text);
+  padding: 0.65rem 0.75rem;
+}
+
+.project-nav a:hover,
+.project-nav a.active {
+  background: var(--surface);
+  text-decoration: none;
+}
+
+.project-name {
+  overflow-wrap: anywhere;
+  font-weight: 800;
+}
+
+.project-meta,
+.empty-state,
+.entry-status,
+.page-head p,
+.metric span {
+  color: var(--muted);
+}
+
+.content {
+  min-width: 0;
+  padding: 1.5rem;
+}
+
+.page-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.page-head h1,
+.page-head p {
+  margin: 0;
+}
+
+.page-head h1 {
+  font-size: 2rem;
+  line-height: 1.1;
+}
+
+.eyebrow {
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.metric {
+  display: grid;
+  gap: 0.3rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 1rem;
+}
+
+.metric strong {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.entry-section {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.entry-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.entry {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 1rem;
+}
+
+.entry header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.entry h3,
+.entry p {
+  margin: 0;
+}
+
+.entry h3 {
+  font-size: 1rem;
+}
+
+.entry time {
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.entry-content {
+  margin-top: 0.7rem;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.search-bar {
+  display: grid;
+  grid-template-columns: auto minmax(12rem, 1fr) auto auto;
+  align-items: center;
+  gap: 0.65rem;
+  margin-bottom: 1rem;
+}
+
+.alert {
+  border: 1px solid #e4c35c;
+  border-radius: 6px;
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  margin: 0 0 1rem;
+  padding: 0.75rem 0.9rem;
+}
+
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 1rem;
+}
+
+.login-shell {
+  width: min(100%, 26rem);
+}
+
+.login-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 1.25rem;
+}
+
+.login-panel h1,
+.login-panel p {
+  margin: 0;
+}
+
+.login-panel form {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 1.2rem;
+}
+
+.login-panel label {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .topbar,
+  .app-shell,
+  .search-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar nav,
+  .logout-form {
+    justify-content: start;
+  }
+
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .entry header {
+    display: grid;
+  }
+
+  .entry time {
+    white-space: normal;
+  }
+}

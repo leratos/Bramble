@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}{{ summary.name }} - Bramble Admin{% endblock %}
+
+{% block content %}
+  <section class="page-head" aria-labelledby="project-title">
+    <div>
+      <p class="eyebrow">Projekt</p>
+      <h1 id="project-title">{{ summary.name }}</h1>
+      <p>
+        {{ summary.entry_count }} Eintraege -
+        letzter Eintrag {{ summary.last_timestamp_iso() }}
+      </p>
+    </div>
+  </section>
+
+  <form
+    class="search-bar"
+    method="get"
+    action="{{ url_for('project_detail', project=summary.name) }}"
+  >
+    <label for="q">Suche</label>
+    <input id="q" name="q" value="{{ query }}" maxlength="200" placeholder="FTS5-Suche">
+    <button type="submit">Suchen</button>
+    {% if query %}
+      <a href="{{ url_for('project_detail', project=summary.name) }}">Zuruecksetzen</a>
+    {% endif %}
+  </form>
+
+  {% if search_error %}
+    <p class="alert" role="alert">{{ search_error }}</p>
+  {% endif %}
+
+  <section class="entry-section" aria-labelledby="journal-title">
+    <h2 id="journal-title">{% if query %}Suchergebnisse{% else %}Journal{% endif %}</h2>
+    <div class="entry-list">
+      {% for entry in entries %}
+        <article class="entry" id="entry-{{ entry.id }}">
+          <header>
+            <div>
+              {% if entry.title %}<h3>{{ entry.title }}</h3>{% endif %}
+              <p class="entry-status">
+                {{ entry.status.value }}{% if entry.phase %} - {{ entry.phase }}{% endif %}
+              </p>
+            </div>
+            <time datetime="{{ entry.timestamp_iso() }}">{{ entry.timestamp_iso() }}</time>
+          </header>
+          <p class="entry-content">{{ entry.content }}</p>
+        </article>
+      {% else %}
+        <p class="empty-state">Keine passenden Eintraege.</p>
+      {% endfor %}
+    </div>
+  </section>
+{% endblock %}

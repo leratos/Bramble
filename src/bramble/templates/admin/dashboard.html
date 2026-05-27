@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Bramble Admin{% endblock %}
+
+{% block content %}
+  <section class="page-head" aria-labelledby="dashboard-title">
+    <div>
+      <p class="eyebrow">Read-only MVP</p>
+      <h1 id="dashboard-title">Dashboard</h1>
+    </div>
+  </section>
+
+  <section class="metric-grid" aria-label="Statistik">
+    <article class="metric">
+      <span>Projekte</span>
+      <strong>{{ stats.project_count }}</strong>
+    </article>
+    <article class="metric">
+      <span>Eintraege</span>
+      <strong>{{ stats.total_entries }}</strong>
+    </article>
+    <article class="metric">
+      <span>24 Stunden</span>
+      <strong>{{ stats.entries_last_24h }}</strong>
+    </article>
+    <article class="metric">
+      <span>7 Tage</span>
+      <strong>{{ stats.entries_last_7d }}</strong>
+    </article>
+    <article class="metric">
+      <span>30 Tage</span>
+      <strong>{{ stats.entries_last_30d }}</strong>
+    </article>
+  </section>
+
+  <section class="entry-section" aria-labelledby="recent-title">
+    <h2 id="recent-title">Letzte Eintraege</h2>
+    <div class="entry-list">
+      {% for entry in stats.recent_entries %}
+        <article class="entry">
+          <header>
+            <div>
+              <a href="{{ url_for('project_detail', project=entry.project) }}">
+                {{ entry.project }}
+              </a>
+              {% if entry.title %}<h3>{{ entry.title }}</h3>{% endif %}
+            </div>
+            <time datetime="{{ entry.timestamp_iso() }}">{{ entry.timestamp_iso() }}</time>
+          </header>
+          <p class="entry-status">
+            {{ entry.status.value }}{% if entry.phase %} - {{ entry.phase }}{% endif %}
+          </p>
+          <p class="entry-content">{{ entry.content }}</p>
+        </article>
+      {% else %}
+        <p class="empty-state">Noch keine Journal-Eintraege.</p>
+      {% endfor %}
+    </div>
+  </section>
+{% endblock %}
