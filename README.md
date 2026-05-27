@@ -246,9 +246,11 @@ Bramble/
 │   └── journal.txt      # Legacy-Importquelle; keine neuen Eintraege
 ├── deploy/
 │   ├── bramble-backup-snapshot.sh
+│   ├── bramble-admin.service
 │   ├── bramble.service  # systemd-Unit
 │   └── fail2ban/        # Fail2Ban-Filter/Jail
 ├── scripts/
+│   ├── gen_admin_secret.py
 │   ├── gen_token.py     # Projekt-Token erzeugen/rotieren
 │   ├── import_journal_txt.py
 │   ├── init_db.py       # Migration / DB-Bootstrap

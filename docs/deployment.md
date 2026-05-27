@@ -44,7 +44,7 @@ Verzeichnis-Layout unter `/opt/bramble`:
 | `/opt/bramble/` | Repository (Code, `scripts/`, `deploy/`) |
 | `/opt/bramble/.venv/` | virtuelle Python-Umgebung |
 | `/opt/bramble/data/` | SQLite-DB `bramble.db` (+ WAL-Sidecars) |
-| `/opt/bramble/secrets/` | `tokens.json` – **nie** im Repo |
+| `/opt/bramble/secrets/` | `tokens.json`, `admin-ui.json` – **nie** im Repo |
 
 ---
 
@@ -146,6 +146,79 @@ systemd-Konfiguration überlagert.
 
 ---
 
+## 5b. Admin-UI systemd-Unit installieren (Phase 4b)
+
+Die Admin-UI ist ein eigener Server und wird **nicht** in Plesk/Nginx
+eingetragen. Zugriff erfolgt nur per SSH-Tunnel auf den Loopback-Bind
+`127.0.0.1:8770`.
+
+Nach einem Pull der Phase-4b-Änderungen die venv aktualisieren, damit
+`bramble-admin`, Starlette/Jinja2/Uvicorn und `argon2-cffi` installiert
+sind:
+
+```sh
+cd /opt/bramble
+sudo -u bramble /opt/bramble/.venv/bin/pip install .
+```
+
+Admin-Secret erzeugen. Das Passwort wird interaktiv abgefragt und nicht
+in die Shell-History geschrieben:
+
+```sh
+sudo -u bramble /opt/bramble/.venv/bin/python \
+    /opt/bramble/scripts/gen_admin_secret.py \
+    --output /opt/bramble/secrets/admin-ui.json
+chmod 600 /opt/bramble/secrets/admin-ui.json
+chown bramble:bramble /opt/bramble/secrets/admin-ui.json
+```
+
+Unit installieren und starten:
+
+```sh
+cp /opt/bramble/deploy/bramble-admin.service \
+    /etc/systemd/system/bramble-admin.service
+systemctl daemon-reload
+systemctl enable --now bramble-admin
+```
+
+Status, Logs und Loopback-Bind prüfen:
+
+```sh
+systemctl status bramble-admin
+journalctl -u bramble-admin -n 50 --no-pager
+ss -ltnp | grep ':8770'
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' \
+    http://127.0.0.1:8770/
+curl -s -o /dev/null -w '%{http_code}\n' \
+    http://127.0.0.1:8770/login
+```
+
+Erwartung:
+
+* `ss` zeigt ausschließlich `127.0.0.1:8770`, nicht `0.0.0.0:8770`.
+* `/` antwortet ohne Login mit `303` nach `/login?next=/`.
+* `/login` antwortet mit `200`.
+* Es gibt keinen Plesk-/Nginx-Pfad wie `/admin`.
+
+Lokaler Zugriff vom eigenen Rechner:
+
+```sh
+ssh -L 8770:127.0.0.1:8770 lera@h2724315.stratoserver.net
+```
+
+Danach lokal im Browser öffnen:
+
+```text
+http://127.0.0.1:8770
+```
+
+Bei Produktivbetrieb soll SSH zusätzlich per `nftables` auf die
+NordVPN Dedicated IP und dokumentierte Break-Glass-Ausnahmen
+eingeschränkt werden. Firewall-Änderungen nur mit zweiter offener
+SSH-Session und Rollback-Fenster ausrollen.
+
+---
+
 ## 6. Nginx-Reverse-Proxy über Plesk
 
 Plesk verwaltet vHost und TLS; Bramble liefert nur Zusatzanweisungen
@@ -229,10 +302,13 @@ statt `/opt/bramble/data/bramble.db`. Die WAL-Sidecars
 der `.backup`-Snapshot ist bereits ein vollständiger, in sich
 konsistenter Stand.
 
-Zusätzlich sollte die Token-Datei in das verschlüsselte Borg-Backup:
-`/opt/bramble/secrets/tokens.json`. Ohne sie bleiben die Journal-Daten
-zwar restaurierbar, aber alle eingerichteten Connector-Tokens müssten
-nach einem Restore rotiert und in den Clients neu eingetragen werden.
+Zusätzlich sollten die Secret-Dateien in das verschlüsselte
+Borg-Backup: `/opt/bramble/secrets/tokens.json` und
+`/opt/bramble/secrets/admin-ui.json`. Ohne `tokens.json` bleiben die
+Journal-Daten zwar restaurierbar, aber alle eingerichteten
+Connector-Tokens müssten nach einem Restore rotiert und in den Clients
+neu eingetragen werden. Ohne `admin-ui.json` muss das Admin-Passwort
+nach einem Restore neu gesetzt werden.
 
 Nach dem ersten Backup einen Restore-Test gegen den frisch erzeugten
 Archivstand machen. Wichtig: die Umleitung `>` muss in derselben
@@ -284,6 +360,7 @@ Für genau dieses Script:
 # Bramble (SQLite WAL)
 BRAMBLE_SNAPSHOT=""
 BRAMBLE_TOKENS="/opt/bramble/secrets/tokens.json"
+BRAMBLE_ADMIN_SECRET="/opt/bramble/secrets/admin-ui.json"
 ```
 
 2. Nach dem Synapse-PostgreSQL-Dump und vor
@@ -300,7 +377,9 @@ log "Bramble Snapshot: ${BRAMBLE_SNAPSHOT}"
 ```sh
     "$BRAMBLE_SNAPSHOT"                                \
     "$BRAMBLE_TOKENS"                                  \
+    "$BRAMBLE_ADMIN_SECRET"                            \
     /etc/systemd/system/bramble.service                \
+    /etc/systemd/system/bramble-admin.service          \
     /etc/fail2ban/filter.d/bramble.conf                \
     /etc/fail2ban/jail.d/bramble.conf                  \
 ```

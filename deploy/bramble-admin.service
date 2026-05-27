@@ -1,0 +1,56 @@
+# systemd unit for the Bramble admin UI (Phase-4b read-only MVP).
+#
+# Install: copy to /etc/systemd/system/bramble-admin.service, then
+#   systemctl daemon-reload && systemctl enable --now bramble-admin
+# See docs/deployment.md for the full runbook.
+
+[Unit]
+Description=Bramble admin UI
+Documentation=https://github.com/leratos/Bramble
+After=network-online.target bramble.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bramble
+Group=bramble
+WorkingDirectory=/opt/bramble
+ExecStart=/opt/bramble/.venv/bin/bramble-admin
+Restart=on-failure
+RestartSec=5
+
+# Runtime configuration. AdminConfig resolves CLI > Env > Default,
+# so these env vars are the deployment's single source of truth.
+Environment=PYTHONUNBUFFERED=1
+Environment=BRAMBLE_DB_PATH=/opt/bramble/data/bramble.db
+Environment=BRAMBLE_ADMIN_HOST=127.0.0.1
+Environment=BRAMBLE_ADMIN_PORT=8770
+Environment=BRAMBLE_ADMIN_LOG_LEVEL=INFO
+Environment=BRAMBLE_ADMIN_SECRET_FILE=/opt/bramble/secrets/admin-ui.json
+Environment=BRAMBLE_ADMIN_SESSION_IDLE_SECONDS=1800
+Environment=BRAMBLE_ADMIN_SESSION_ABSOLUTE_SECONDS=28800
+Environment=BRAMBLE_ADMIN_LOGIN_MAX_ATTEMPTS=5
+Environment=BRAMBLE_ADMIN_LOGIN_WINDOW_SECONDS=300
+Environment=BRAMBLE_ADMIN_COOKIE_SECURE=false
+Environment=BRAMBLE_ADMIN_ALLOWED_HOSTS=127.0.0.1,localhost
+
+# Hardening. The admin UI is intentionally reachable only through an
+# SSH tunnel to 127.0.0.1:8770. It reads the SQLite DB and the admin
+# secret; /opt/bramble/data is writable only so SQLite can manage WAL
+# sidecars while AdminReadModel sets PRAGMA query_only for reads.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/bramble/data
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
