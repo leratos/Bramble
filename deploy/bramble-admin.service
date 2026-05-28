@@ -34,6 +34,7 @@ Environment=BRAMBLE_ADMIN_LOGIN_MAX_ATTEMPTS=5
 Environment=BRAMBLE_ADMIN_LOGIN_WINDOW_SECONDS=300
 Environment=BRAMBLE_ADMIN_COOKIE_SECURE=false
 Environment=BRAMBLE_ADMIN_ALLOWED_HOSTS=127.0.0.1,localhost
+Environment=BRAMBLE_ADMIN_TIME_ZONE=Europe/Berlin
 
 # Hardening. The admin UI is intentionally reachable only through an
 # SSH tunnel to 127.0.0.1:8770. /opt/bramble/data is writable so

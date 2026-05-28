@@ -177,6 +177,11 @@ Die Admin-UI verwendet dieselbe Token-Datei wie der MCP-Service:
 und bleibt Besitzer `bramble:bramble`, damit die Tokenverwaltung
 atomar ueber eine temporaere Nachbardatei schreiben kann.
 
+Zeitstempel bleiben in der Datenbank UTC. Die Admin-UI formatiert sie
+nur fuer die Anzeige in `BRAMBLE_ADMIN_TIME_ZONE` (Default in der Unit:
+`Europe/Berlin`) und kuerzt auf Minute plus Zeitzonenkuerzel, z. B.
+`2026-05-28 22:41 CEST`.
+
 Unit installieren und starten:
 
 ```sh

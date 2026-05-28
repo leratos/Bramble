@@ -12,6 +12,7 @@ from bramble.admin_config import (
     ENV_ADMIN_HOST,
     ENV_ADMIN_PORT,
     ENV_ADMIN_SECRET_FILE,
+    ENV_ADMIN_TIME_ZONE,
     AdminConfig,
 )
 from bramble.server_config import ENV_DB_PATH, ENV_TOKENS_FILE
@@ -29,6 +30,7 @@ class TestAdminConfigConstruction:
         assert cfg.session_absolute_seconds == 28800
         assert cfg.login_max_attempts == 5
         assert cfg.allowed_hosts == ("127.0.0.1", "localhost")
+        assert cfg.display_timezone == "Europe/Berlin"
 
     @pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10", "example.com"])
     def test_rejects_non_loopback_host(self, host: str) -> None:
@@ -48,6 +50,13 @@ class TestAdminConfigConstruction:
                 session_absolute_seconds=30,
             )
 
+    def test_rejects_unknown_display_timezone(self) -> None:
+        with pytest.raises(ValueError, match="supported timezone"):
+            AdminConfig(
+                db_path=Path("./data/bramble.db"),
+                display_timezone="Not/AZone",
+            )
+
 
 class TestAdminConfigFromSources:
     def test_env_overrides_defaults(self) -> None:
@@ -59,6 +68,7 @@ class TestAdminConfigFromSources:
             ENV_TOKENS_FILE: "/opt/bramble/secrets/tokens.json",
             ENV_ADMIN_COOKIE_SECURE: "true",
             ENV_ADMIN_ALLOWED_HOSTS: "127.0.0.1,localhost,testserver",
+            ENV_ADMIN_TIME_ZONE: "UTC",
         }
 
         cfg = AdminConfig.from_sources(argv=[], env=env)
@@ -70,12 +80,14 @@ class TestAdminConfigFromSources:
         assert cfg.tokens_file == Path("/opt/bramble/secrets/tokens.json")
         assert cfg.cookie_secure is True
         assert cfg.allowed_hosts == ("127.0.0.1", "localhost", "testserver")
+        assert cfg.display_timezone == "UTC"
 
     def test_cli_overrides_env(self) -> None:
         env = {
             ENV_ADMIN_PORT: "8771",
             ENV_ADMIN_SECRET_FILE: "/env/admin.json",
             ENV_TOKENS_FILE: "/env/tokens.json",
+            ENV_ADMIN_TIME_ZONE: "UTC",
         }
         argv = [
             "--port",
@@ -86,6 +98,8 @@ class TestAdminConfigFromSources:
             "/cli/tokens.json",
             "--allowed-host",
             "testserver",
+            "--time-zone",
+            "Europe/Berlin",
         ]
 
         cfg = AdminConfig.from_sources(argv=argv, env=env)
@@ -94,6 +108,7 @@ class TestAdminConfigFromSources:
         assert cfg.admin_secret_file == Path("/cli/admin.json")
         assert cfg.tokens_file == Path("/cli/tokens.json")
         assert cfg.allowed_hosts == ("testserver",)
+        assert cfg.display_timezone == "Europe/Berlin"
 
     def test_rejects_public_host_from_env(self) -> None:
         with pytest.raises(ValueError, match="loopback"):

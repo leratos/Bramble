@@ -8,7 +8,9 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from zoneinfo import ZoneInfoNotFoundError
 
+from bramble.admin_time import get_display_timezone
 from bramble.server_config import ENV_DB_PATH, ENV_TOKENS_FILE
 
 _DEFAULT_DB_PATH = Path("./data/bramble.db")
@@ -22,6 +24,7 @@ _DEFAULT_SESSION_ABSOLUTE_SECONDS = 8 * 60 * 60
 _DEFAULT_LOGIN_MAX_ATTEMPTS = 5
 _DEFAULT_LOGIN_WINDOW_SECONDS = 5 * 60
 _DEFAULT_ALLOWED_HOSTS = ("127.0.0.1", "localhost")
+_DEFAULT_DISPLAY_TIMEZONE = "Europe/Berlin"
 
 ENV_ADMIN_HOST = "BRAMBLE_ADMIN_HOST"
 ENV_ADMIN_PORT = "BRAMBLE_ADMIN_PORT"
@@ -33,6 +36,7 @@ ENV_ADMIN_LOGIN_MAX_ATTEMPTS = "BRAMBLE_ADMIN_LOGIN_MAX_ATTEMPTS"
 ENV_ADMIN_LOGIN_WINDOW_SECONDS = "BRAMBLE_ADMIN_LOGIN_WINDOW_SECONDS"
 ENV_ADMIN_COOKIE_SECURE = "BRAMBLE_ADMIN_COOKIE_SECURE"
 ENV_ADMIN_ALLOWED_HOSTS = "BRAMBLE_ADMIN_ALLOWED_HOSTS"
+ENV_ADMIN_TIME_ZONE = "BRAMBLE_ADMIN_TIME_ZONE"
 
 _VALID_LOG_LEVELS: frozenset[str] = frozenset(
     {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
@@ -55,6 +59,7 @@ class AdminConfig:
     login_window_seconds: int = _DEFAULT_LOGIN_WINDOW_SECONDS
     cookie_secure: bool = False
     allowed_hosts: tuple[str, ...] = _DEFAULT_ALLOWED_HOSTS
+    display_timezone: str = _DEFAULT_DISPLAY_TIMEZONE
 
     def __post_init__(self) -> None:
         self._validate_db_path()
@@ -69,6 +74,7 @@ class AdminConfig:
         self._validate_login_max_attempts()
         self._validate_cookie_secure()
         self._validate_allowed_hosts()
+        self._validate_display_timezone()
         if self.session_absolute_seconds < self.session_idle_seconds:
             raise ValueError(
                 "session_absolute_seconds must be >= session_idle_seconds"
@@ -137,6 +143,19 @@ class AdminConfig:
         for host in self.allowed_hosts:
             if not isinstance(host, str) or not host.strip():
                 raise ValueError("allowed_hosts must contain non-empty strings")
+
+    def _validate_display_timezone(self) -> None:
+        if not isinstance(self.display_timezone, str):
+            raise TypeError("display_timezone must be a string")
+        if not self.display_timezone.strip():
+            raise ValueError("display_timezone must not be empty")
+        try:
+            get_display_timezone(self.display_timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(
+                f"display_timezone {self.display_timezone!r} is not a valid "
+                "or supported timezone"
+            ) from exc
 
     @classmethod
     def from_sources(
@@ -217,6 +236,11 @@ class AdminConfig:
                 env_value=environ.get(ENV_ADMIN_ALLOWED_HOSTS),
                 default=_DEFAULT_ALLOWED_HOSTS,
             ),
+            display_timezone=_resolve_str(
+                cli=ns.time_zone,
+                env_value=environ.get(ENV_ADMIN_TIME_ZONE),
+                default=_DEFAULT_DISPLAY_TIMEZONE,
+            ),
         )
 
 
@@ -291,6 +315,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Allowed Host header. Repeatable; defaults to 127.0.0.1 and localhost "
             f"(env: {ENV_ADMIN_ALLOWED_HOSTS}, comma-separated)."
+        ),
+    )
+    parser.add_argument(
+        "--time-zone",
+        dest="time_zone",
+        help=(
+            "IANA timezone for admin timestamp display "
+            f"(env: {ENV_ADMIN_TIME_ZONE}; default: {_DEFAULT_DISPLAY_TIMEZONE})."
         ),
     )
     return parser

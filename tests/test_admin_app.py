@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from starlette.testclient import TestClient
 from bramble.admin_app import create_admin_app
 from bramble.admin_auth import LoginRateLimiter, SessionStore
 from bramble.admin_config import AdminConfig
+from bramble.admin_time import format_display_datetime, get_display_timezone
 from bramble.journal_db import JournalDB
 from bramble.journal_entry import JournalEntry, JournalStatus
 from bramble.token_store import TokenStore, write_token_map
@@ -122,6 +124,27 @@ class TestAdminApp:
         assert "bramble" in response.text
         assert "elder-berry" in response.text
         assert "read-only dashboard entry" in response.text
+
+    def test_dashboard_formats_timestamps_in_display_timezone(
+        self, admin_client: TestClient, db: JournalDB
+    ) -> None:
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                title="DST timestamp",
+                content="display timezone check",
+                timestamp=datetime(2026, 5, 28, 20, 41, 44, 656494, tzinfo=UTC),
+            )
+        )
+        _login(admin_client)
+
+        response = admin_client.get("/")
+
+        assert response.status_code == 200
+        assert 'datetime="2026-05-28T20:41:44.656494+00:00"' in response.text
+        assert "2026-05-28 22:41 CEST" in response.text
+        assert ">2026-05-28T20:41:44.656494+00:00</time>" not in response.text
 
     def test_project_view_searches_without_writing(
         self, admin_client: TestClient, db: JournalDB
@@ -252,3 +275,19 @@ class TestAdminApp:
         event = admin_client.app.state.admin.audit_log.read_recent()[0]
         assert event.action == "token.revoke"
         assert event.target == "bramble"
+
+
+def test_format_display_datetime_uses_dst_rules() -> None:
+    berlin = get_display_timezone("Europe/Berlin")
+
+    summer = format_display_datetime(
+        datetime(2026, 5, 28, 20, 41, 44, tzinfo=UTC),
+        berlin,
+    )
+    winter = format_display_datetime(
+        datetime(2026, 1, 28, 20, 41, 44, tzinfo=UTC),
+        berlin,
+    )
+
+    assert summer == "2026-05-28 22:41 CEST"
+    assert winter == "2026-01-28 21:41 CET"

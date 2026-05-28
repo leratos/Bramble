@@ -27,6 +27,7 @@ from bramble.admin_auth import (
 )
 from bramble.admin_config import AdminConfig
 from bramble.admin_read_model import AdminReadModel
+from bramble.admin_time import format_display_datetime, get_display_timezone
 from bramble.journal_db import JournalDB
 from bramble.project_summary import ProjectSummary
 from bramble.token_store import TokenMutation, TokenStore
@@ -118,6 +119,10 @@ def create_admin_app(
     audit_log = audit_log or AdminAuditLog(db)
     audit_log.initialize()
     templates = Jinja2Templates(directory=str(templates_dir))
+    display_tz = get_display_timezone(config.display_timezone)
+    templates.env.filters["admin_datetime"] = (
+        lambda value: format_display_datetime(value, display_tz)
+    )
 
     routes = [
         Route("/", dashboard, methods=["GET"], name="dashboard"),

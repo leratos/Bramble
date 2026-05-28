@@ -45,7 +45,9 @@
               </a>
               {% if entry.title %}<h3>{{ entry.title }}</h3>{% endif %}
             </div>
-            <time datetime="{{ entry.timestamp_iso() }}">{{ entry.timestamp_iso() }}</time>
+            <time datetime="{{ entry.timestamp_iso() }}" title="{{ entry.timestamp_iso() }}">
+              {{ entry.timestamp|admin_datetime }}
+            </time>
           </header>
           <p class="entry-status">
             {{ entry.status.value }}{% if entry.phase %} - {{ entry.phase }}{% endif %}
