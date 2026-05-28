@@ -88,6 +88,33 @@ Body.
     assert "Datum:" not in result.entries[0].content
 
 
+def test_parse_accepts_bold_markdown_date_label() -> None:
+    text = """## Abgeschlossen: Deployment-Script robuster gemacht
+
+**Datum:** 2026-03-08
+Body.
+"""
+    result = import_journal_txt.parse_journal_text(text)
+
+    assert result.issues == []
+    assert len(result.entries) == 1
+    assert result.entries[0].timestamp == datetime(2026, 3, 8, 12, 0, tzinfo=UTC)
+    assert "Datum:" not in result.entries[0].content
+
+
+def test_parse_accepts_german_date_in_heading() -> None:
+    text = """## Abgeschlossen: fix/timer-inserttag-quote-escaping (20.02.2026)
+Body.
+"""
+    result = import_journal_txt.parse_journal_text(text)
+
+    assert result.issues == []
+    assert len(result.entries) == 1
+    entry = result.entries[0]
+    assert entry.timestamp == datetime(2026, 2, 20, 12, 0, tzinfo=UTC)
+    assert entry.title == "fix/timer-inserttag-quote-escaping"
+
+
 def test_parse_accepts_elder_berry_status_labels() -> None:
     text = """## Korrektur: Phase 80 Etappe 2 -- CodeQL-Findings (2026-05-09)
 Body.
@@ -110,6 +137,63 @@ Body.
         JournalStatus.NOTIZ,
         JournalStatus.ABGESCHLOSSEN,
     ]
+
+
+def test_parse_accepts_berry_gym_status_labels() -> None:
+    text = """## Fix: Onboarding Dark Mode Styling (25.02.2026)
+Body.
+
+## Teilweise Abgeschlossen: KI-Limit-Verwaltung im Admin (24.02.2026)
+Body.
+
+## !!! VOLLSTÄNDIG ABGESCHLOSSEN: KI-Limit-Verwaltung im Admin (24.02.2026)
+Body.
+
+## Final: Onboarding UI Polish - PRODUCTION READY! (25.02.2026)
+Body.
+
+## Geplant: Phase 3 - Trainingsblock-Konzept
+**Datum:** 2026-03-13
+Body.
+"""
+    result = import_journal_txt.parse_journal_text(text)
+
+    assert result.issues == []
+    assert [entry.status for entry in result.entries] == [
+        JournalStatus.BUGFIX,
+        JournalStatus.IN_ARBEIT,
+        JournalStatus.ABGESCHLOSSEN,
+        JournalStatus.ABGESCHLOSSEN,
+        JournalStatus.IN_ARBEIT,
+    ]
+
+
+def test_parse_infers_berry_gym_unprefixed_headings() -> None:
+    text = """## Abgeschlossen: Anchor
+**Datum:** 2026-03-01
+Body.
+
+## TODO (offen)
+Body.
+
+## 5 neue Uebungen vom Server integriert
+**Datum:** 2026-03-02
+Body.
+
+## Phase 8 - Prognose & Forecasting
+**Datum:** 2026-03-03
+Body.
+"""
+    result = import_journal_txt.parse_journal_text(text)
+
+    assert result.issues == []
+    assert [entry.status for entry in result.entries] == [
+        JournalStatus.ABGESCHLOSSEN,
+        JournalStatus.IN_ARBEIT,
+        JournalStatus.ABGESCHLOSSEN,
+        JournalStatus.NOTIZ,
+    ]
+    assert result.entries[1].timestamp == datetime(2026, 3, 2, 12, 0, tzinfo=UTC)
 
 
 def test_parse_merges_metadata_headings_into_current_section() -> None:
@@ -161,6 +245,17 @@ Body.
     assert result.issues == []
     assert result.entries[1].status is JournalStatus.NOTIZ
     assert result.entries[1].timestamp == datetime(2026, 5, 8, 12, 0, tzinfo=UTC)
+
+
+def test_parse_infers_merged_phase_heading_as_completed() -> None:
+    text = """## Phase 80 Etappe 1 -- merged in main (2026-05-08)
+Body.
+"""
+    result = import_journal_txt.parse_journal_text(text)
+
+    assert result.issues == []
+    assert len(result.entries) == 1
+    assert result.entries[0].status is JournalStatus.ABGESCHLOSSEN
 
 
 def test_parse_infers_in_progress_for_phase_heading_with_open_work() -> None:

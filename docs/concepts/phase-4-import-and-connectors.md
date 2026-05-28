@@ -33,11 +33,14 @@ Projekt wird deshalb weiterhin erst ein Dry-Run gemacht.
    Import entfernen. ✅
 3. Bramble als Journal-Tool für KI-Clients konfigurieren. ✅
 4. Elder-Berry importieren.
-   **Aktueller Schritt.** Lokaler Dry-Run gegen
-   `C:\Dev\Elder-Berry\docs\journal.txt` ist parsebar:
-   `174 entries`, `0 issues`.
-5. Weitere Projekte projektweise ergänzen: Bull-Berry, Berry-Gym,
-   Last-Strawberry und spätere Repos.
+   Lokaler Dry-Run gegen `C:\Dev\Elder-Berry\docs\journal.txt` ist
+   parsebar: `174 entries`, `0 issues`.
+5. Berry-Gym importieren.
+   Lokaler Dry-Run gegen `C:\Dev\Berry-Gym\docs\journal.txt` ist
+   parsebar: `303 entries`, `0 issues`.
+6. Weitere Projekte projektweise ergänzen: Bull-Berry, Last-Strawberry
+   und spätere Repos, falls dort noch legacy `journal.txt`-Quellen
+   existieren.
 
 Für jedes Projekt wird vorher ein eigenes Token erzeugt:
 
@@ -72,13 +75,24 @@ Eigenschaften:
   übersprungen, damit ein versehentlicher zweiter Import keine
   Duplikate erzeugt. `--allow-duplicates` ist nur für bewusste
   Sonderfälle gedacht.
-* Elder-Berry-Legacy-Format wird unterstuetzt:
+* Elder-Berry- und Berry-Gym-Legacy-Formate werden unterstuetzt:
   * Datum im Heading, z. B. `(2026-05-10)`.
+  * Deutsche Datumsschreibweise im Heading, z. B. `(20.02.2026)`.
+  * Markdown-Datumszeilen wie `**Datum:** YYYY-MM-DD`.
   * `- Datum: YYYY-MM-DD` im Body.
   * zusaetzliche Statuslabels wie `Hotfix`, `Korrektur`, `Nachtrag`,
     `Stand`, `Update`, `Konzept`, `Abschluss`.
+  * Berry-Gym-Statuslabels wie `Fix`, `Final`, `Test`, `Geplant`,
+    `Roadmap-Fix`, `Roadmap-Update`, `Teilweise Abgeschlossen` und
+    `Vollstaendig Abgeschlossen`.
+  * Unpraefixierte Berry-Gym-Headings wie `TODO (offen)`, `PUBLIC
+    LAUNCH`, Roadmap-/Konzeptnotizen, implementierte Phasen und
+    empirische Klaerungen werden konservativ auf Bramble-Status
+    abgebildet.
   * Metadaten-Headings `## Branch:` und `## Naechster Schritt:` werden
     als Body-Metadaten des aktuellen Abschnitts behandelt.
+  * CLI-Ausgaben ersetzen nicht darstellbare Zeichen, statt unter
+    Windows-Codepages am Dry-Run-Report abzubrechen.
 
 Dry-Run für Brambles eigenes Journal auf dem Host:
 

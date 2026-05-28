@@ -36,8 +36,19 @@ DEFAULT_DB_PATH = ROOT / "data" / "bramble.db"
 DEFAULT_SOURCE = ROOT / "docs" / "journal.txt"
 
 _KEBAB_CASE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-_DATE_RE = re.compile(
+_ISO_DATE_RE = re.compile(
     r"(?P<date>\d{4}-\d{2}-\d{2})(?:[ T](?P<clock>\d{2}:\d{2}(?::\d{2})?))?"
+)
+_GERMAN_DATE_RE = re.compile(
+    r"(?P<day>\d{1,2})\.(?P<month>\d{1,2})\.(?P<year>\d{4})"
+    r"(?:[ T](?P<clock>\d{2}:\d{2}(?::\d{2})?))?"
+)
+_HEADING_TIMESTAMP_RE = re.compile(
+    r"\s*\(\s*"
+    r"(?:\d{4}-\d{2}-\d{2}|\d{1,2}\.\d{1,2}\.\d{4})"
+    r"(?:[ T]\d{2}:\d{2}(?::\d{2})?)?"
+    r"(?:\s*,\s*[^)]*)?"
+    r"\s*\)\s*$"
 )
 _PHASE_RE = re.compile(
     r"\bPhase[- ](?P<number>\d+(?:[a-z]|(?:\.[0-9a-z]+))?)\b",
@@ -228,6 +239,8 @@ def resolve_db_path(cli_value: Path | None) -> Path:
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
 
+    _configure_output_streams()
+
     args = parse_args(argv)
 
     if not _KEBAB_CASE_RE.match(args.project):
@@ -392,12 +405,16 @@ def _parse_heading(heading: str) -> tuple[JournalStatus, str] | None:
 
 
 def _status_from_label(label: str) -> JournalStatus | None:
-    normalised = re.sub(r"[\s_]+", " ", label.strip().casefold())
+    normalised = _normalise_heading_text(label)
     return {
         "in arbeit": JournalStatus.IN_ARBEIT,
         "abgeschlossen": JournalStatus.ABGESCHLOSSEN,
         "abschluss": JournalStatus.ABGESCHLOSSEN,
+        "vollstandig abgeschlossen": JournalStatus.ABGESCHLOSSEN,
+        "vollständig abgeschlossen": JournalStatus.ABGESCHLOSSEN,
+        "teilweise abgeschlossen": JournalStatus.IN_ARBEIT,
         "bugfix": JournalStatus.BUGFIX,
+        "fix": JournalStatus.BUGFIX,
         "hotfix": JournalStatus.BUGFIX,
         "hotfix-reparatur": JournalStatus.BUGFIX,
         "korrektur": JournalStatus.BUGFIX,
@@ -406,21 +423,66 @@ def _status_from_label(label: str) -> JournalStatus | None:
         "stand": JournalStatus.NOTIZ,
         "update": JournalStatus.NOTIZ,
         "konzept": JournalStatus.NOTIZ,
+        "konzept bestätigt": JournalStatus.NOTIZ,
+        "architektur-entscheidung": JournalStatus.NOTIZ,
+        "geplant": JournalStatus.IN_ARBEIT,
+        "roadmap-fix": JournalStatus.BUGFIX,
+        "roadmap-update": JournalStatus.NOTIZ,
+        "final": JournalStatus.ABGESCHLOSSEN,
+        "test": JournalStatus.NOTIZ,
     }.get(normalised)
 
 
 def _infer_status_from_unprefixed_heading(heading: str) -> JournalStatus | None:
-    lower = heading.casefold()
+    lower = _normalise_heading_text(heading)
+    if lower.startswith("todo") or lower.startswith("offene "):
+        return JournalStatus.IN_ARBEIT
+    if lower.startswith("nächste ") or lower.startswith("naechste "):
+        return JournalStatus.IN_ARBEIT
+    if lower.startswith("geplant"):
+        return JournalStatus.IN_ARBEIT
     if lower.startswith("phase ") and (
         "offen" in lower or "code umgesetzt" in lower or "in arbeit" in lower
     ):
         return JournalStatus.IN_ARBEIT
-    if lower.startswith("hinweis"):
-        return JournalStatus.NOTIZ
-    if "merged in main" in lower or "gemerged in main" in lower:
+    if (
+        "abgeschlossen" in lower
+        or "vollständig abgeschlossen" in lower
+        or "vollstandig abgeschlossen" in lower
+        or "implementiert" in lower
+        or "integriert" in lower
+        or re.search(r"\bgesetzt\b", lower)
+        or "optimiert" in lower
+        or "entfernt" in lower
+        or "hinzugefügt" in lower
+        or "hinzugefuegt" in lower
+        or "auf aktuellen stand gebracht" in lower
+        or "erreicht" in lower
+        or "produktionsreif" in lower
+        or "production ready" in lower
+        or "tests grün" in lower
+        or "tests gruen" in lower
+        or "public launch" in lower
+        or "merged in main" in lower
+        or "gemerged in main" in lower
+    ):
         return JournalStatus.ABGESCHLOSSEN
-    if "hotfix" in lower or "pr-review-fix" in lower or "review-fix" in lower:
+    if "fix" in lower or "hotfix" in lower or "pr-review-fix" in lower:
         return JournalStatus.BUGFIX
+    if (
+        lower.startswith("hinweis")
+        or lower.startswith("konzept")
+        or lower.startswith("architektur-entscheidung")
+        or lower.startswith("empirische klärung")
+        or lower.startswith("empirische klaerung")
+        or lower.startswith("klärung")
+        or lower.startswith("klaerung")
+        or lower.startswith("management command")
+        or lower.startswith("gesamtlauf")
+        or lower.startswith("roadmap")
+        or lower.startswith("phase ")
+    ):
+        return JournalStatus.NOTIZ
     return None
 
 
@@ -429,25 +491,42 @@ def _find_timestamp(body_lines: list[str]) -> tuple[int | None, datetime | None]
         normalised = line.strip()
         if normalised.startswith("- "):
             normalised = normalised[2:].strip()
-        if normalised.startswith("Datum:"):
+        if re.match(r"^\**\s*Datum\s*:\**", normalised, re.IGNORECASE):
             return index, _parse_timestamp(normalised)
     return None, None
 
 
 def _parse_timestamp(line: str) -> datetime | None:
-    match = _DATE_RE.search(line)
-    if not match:
+    iso_match = _ISO_DATE_RE.search(line)
+    if iso_match:
+        date_part = iso_match.group("date")
+        clock = iso_match.group("clock")
+        try:
+            if clock is None:
+                date_value = datetime.fromisoformat(date_part).date()
+                return datetime.combine(date_value, time(hour=12), tzinfo=UTC)
+            if clock.count(":") == 1:
+                clock = f"{clock}:00"
+            return datetime.fromisoformat(f"{date_part}T{clock}").replace(tzinfo=UTC)
+        except ValueError:
+            return None
+
+    german_match = _GERMAN_DATE_RE.search(line)
+    if not german_match:
         return None
 
-    date_part = match.group("date")
-    clock = match.group("clock")
+    day = int(german_match.group("day"))
+    month = int(german_match.group("month"))
+    year = int(german_match.group("year"))
+    clock = german_match.group("clock")
     try:
         if clock is None:
-            date_value = datetime.fromisoformat(date_part).date()
+            date_value = datetime(year, month, day).date()
             return datetime.combine(date_value, time(hour=12), tzinfo=UTC)
         if clock.count(":") == 1:
             clock = f"{clock}:00"
-        return datetime.fromisoformat(f"{date_part}T{clock}").replace(tzinfo=UTC)
+        hour, minute, second = (int(part) for part in clock.split(":"))
+        return datetime(year, month, day, hour, minute, second, tzinfo=UTC)
     except ValueError:
         return None
 
@@ -458,7 +537,7 @@ def _timestamp_from_heading(heading: str) -> datetime | None:
 
 def _parse_context_timestamp(line: str) -> datetime | None:
     stripped = line.strip()
-    if not _DATE_RE.match(stripped):
+    if not (_ISO_DATE_RE.match(stripped) or _GERMAN_DATE_RE.match(stripped)):
         return None
     return _parse_timestamp(stripped)
 
@@ -493,12 +572,15 @@ def _nearest_timestamp(
 
 
 def _strip_heading_timestamp(title: str) -> str:
-    stripped = re.sub(
-        r"\s*\(\s*\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?\s*\)\s*$",
-        "",
-        title,
-    ).strip()
+    stripped = _HEADING_TIMESTAMP_RE.sub("", title).strip()
     return stripped or title.strip()
+
+
+def _normalise_heading_text(text: str) -> str:
+    normalised = text.strip().casefold()
+    normalised = re.sub(r"^[^\w]+", "", normalised)
+    normalised = re.sub(r"[\s_]+", " ", normalised).strip()
+    return normalised
 
 
 def _is_metadata_heading(heading: str) -> bool:
@@ -575,6 +657,13 @@ def _print_parse_report(
             f"heading={issue.heading!r}: {issue.message}",
             file=sys.stderr,
         )
+
+
+def _configure_output_streams() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(errors="replace")
 
 
 if __name__ == "__main__":
