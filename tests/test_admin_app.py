@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import re
+from pathlib import Path
+
 import pytest
 
 pytest.importorskip("starlette")
@@ -15,6 +19,7 @@ from bramble.admin_auth import LoginRateLimiter, SessionStore
 from bramble.admin_config import AdminConfig
 from bramble.journal_db import JournalDB
 from bramble.journal_entry import JournalEntry, JournalStatus
+from bramble.token_store import TokenStore, write_token_map
 
 
 class _FakeAuthenticator:
@@ -25,7 +30,7 @@ class _FakeAuthenticator:
 
 
 @pytest.fixture()
-def admin_client(db: JournalDB) -> TestClient:
+def admin_client(db: JournalDB, tmp_path: Path) -> TestClient:
     db.append(
         JournalEntry(
             project="bramble",
@@ -41,7 +46,13 @@ def admin_client(db: JournalDB) -> TestClient:
             content="connector setup",
         )
     )
-    config = AdminConfig(db_path=db.db_path, allowed_hosts=("testserver",))
+    tokens_file = tmp_path / "secrets" / "tokens.json"
+    write_token_map(tokens_file, {"bramble": "tok-bramble"})
+    config = AdminConfig(
+        db_path=db.db_path,
+        tokens_file=tokens_file,
+        allowed_hosts=("testserver",),
+    )
     app = create_admin_app(
         db,
         _FakeAuthenticator(),  # type: ignore[arg-type]
@@ -50,8 +61,10 @@ def admin_client(db: JournalDB) -> TestClient:
             idle_seconds=1800,
             absolute_seconds=28800,
             token_factory=lambda: "test-session",
+            csrf_token_factory=lambda: "test-csrf",
         ),
         login_limiter=LoginRateLimiter(max_attempts=2, window_seconds=60),
+        token_store=TokenStore(tokens_file, token_factory=lambda: "generated-token"),
     )
     return TestClient(app)
 
@@ -63,6 +76,18 @@ def _login(client: TestClient) -> None:
         follow_redirects=False,
     )
     assert response.status_code == 303
+
+
+def _tokens_file(client: TestClient) -> Path:
+    return client.app.state.admin.config.tokens_file
+
+
+def _csrf(client: TestClient) -> str:
+    response = client.get("/tokens")
+    assert response.status_code == 200
+    match = re.search(r'name="csrf_token" value="([^"]+)"', response.text)
+    assert match is not None
+    return match.group(1)
 
 
 class TestAdminApp:
@@ -139,3 +164,91 @@ class TestAdminApp:
         assert response.headers["x-frame-options"] == "DENY"
         assert response.headers["x-content-type-options"] == "nosniff"
         assert "script-src 'none'" in response.headers["content-security-policy"]
+
+    def test_logout_requires_csrf(self, admin_client: TestClient) -> None:
+        _login(admin_client)
+
+        response = admin_client.post("/logout", follow_redirects=False)
+
+        assert response.status_code == 403
+
+    def test_token_page_lists_status_without_secret(
+        self, admin_client: TestClient
+    ) -> None:
+        _login(admin_client)
+
+        response = admin_client.get("/tokens")
+
+        assert response.status_code == 200
+        assert "Token vorhanden" in response.text
+        assert "bramble" in response.text
+        assert "elder-berry" in response.text
+        assert "tok-bramble" not in response.text
+
+    def test_token_create_requires_csrf(self, admin_client: TestClient) -> None:
+        _login(admin_client)
+
+        response = admin_client.post("/tokens", data={"project": "berry-gym"})
+
+        assert response.status_code == 403
+        assert json.loads(_tokens_file(admin_client).read_text(encoding="utf-8")) == {
+            "bramble": "tok-bramble"
+        }
+
+    def test_token_create_writes_file_and_audit(
+        self, admin_client: TestClient
+    ) -> None:
+        _login(admin_client)
+
+        response = admin_client.post(
+            "/tokens",
+            data={"project": "berry-gym", "csrf_token": _csrf(admin_client)},
+        )
+
+        assert response.status_code == 200
+        assert "generated-token" in response.text
+        assert "sudo systemctl restart bramble" in response.text
+        assert json.loads(_tokens_file(admin_client).read_text(encoding="utf-8")) == {
+            "berry-gym": "generated-token",
+            "bramble": "tok-bramble",
+        }
+        event = admin_client.app.state.admin.audit_log.read_recent()[0]
+        assert event.action == "token.create"
+        assert event.target == "berry-gym"
+        assert event.result == "success"
+        assert "generated-token" not in str(event.details)
+
+    def test_token_rotate_replaces_only_target(
+        self, admin_client: TestClient
+    ) -> None:
+        _login(admin_client)
+
+        response = admin_client.post(
+            "/tokens/bramble/rotate",
+            data={"csrf_token": _csrf(admin_client)},
+        )
+
+        assert response.status_code == 200
+        assert "generated-token" in response.text
+        assert json.loads(_tokens_file(admin_client).read_text(encoding="utf-8")) == {
+            "bramble": "generated-token"
+        }
+        event = admin_client.app.state.admin.audit_log.read_recent()[0]
+        assert event.action == "token.rotate"
+        assert event.target == "bramble"
+
+    def test_token_revoke_removes_only_target(
+        self, admin_client: TestClient
+    ) -> None:
+        _login(admin_client)
+
+        response = admin_client.post(
+            "/tokens/bramble/revoke",
+            data={"csrf_token": _csrf(admin_client)},
+        )
+
+        assert response.status_code == 200
+        assert json.loads(_tokens_file(admin_client).read_text(encoding="utf-8")) == {}
+        event = admin_client.app.state.admin.audit_log.read_recent()[0]
+        assert event.action == "token.revoke"
+        assert event.target == "bramble"

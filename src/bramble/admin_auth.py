@@ -103,6 +103,7 @@ class AdminSession:
     """Server-side admin session metadata."""
 
     actor: str
+    csrf_token: str
     created_at: float
     last_seen: float
 
@@ -117,6 +118,7 @@ class SessionStore:
         absolute_seconds: int,
         time_source: Any = time.time,
         token_factory: Any = None,
+        csrf_token_factory: Any = None,
     ) -> None:
         _validate_positive_int(idle_seconds, "idle_seconds")
         _validate_positive_int(absolute_seconds, "absolute_seconds")
@@ -126,6 +128,9 @@ class SessionStore:
         self._absolute_seconds = absolute_seconds
         self._now = time_source
         self._token_factory = token_factory or (lambda: secrets.token_urlsafe(32))
+        self._csrf_token_factory = csrf_token_factory or (
+            lambda: secrets.token_urlsafe(32)
+        )
         self._sessions: dict[str, AdminSession] = {}
 
     def create(self, actor: str) -> str:
@@ -133,8 +138,14 @@ class SessionStore:
             raise ValueError("actor must be a non-empty string")
         now = float(self._now())
         session_id = self._token_factory()
+        csrf_token = self._csrf_token_factory()
+        if not isinstance(session_id, str) or not session_id:
+            raise ValueError("token_factory must return a non-empty string")
+        if not isinstance(csrf_token, str) or not csrf_token:
+            raise ValueError("csrf_token_factory must return a non-empty string")
         self._sessions[session_id] = AdminSession(
             actor=actor.strip(),
+            csrf_token=csrf_token,
             created_at=now,
             last_seen=now,
         )

@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}Token - Bramble Admin{% endblock %}
+
+{% block content %}
+  <section class="page-head" aria-labelledby="tokens-title">
+    <div>
+      <p class="eyebrow">Projektzugriff</p>
+      <h1 id="tokens-title">Token</h1>
+      <p>Bestehende Tokenwerte werden nie angezeigt.</p>
+    </div>
+  </section>
+
+  {% if error %}
+    <p class="alert" role="alert">{{ error }}</p>
+  {% endif %}
+
+  {% if mutation %}
+    <section class="notice" aria-labelledby="token-result-title">
+      <h2 id="token-result-title">
+        Token {{ mutation.action }} fuer {{ mutation.project }}
+      </h2>
+      {% if mutation.token %}
+        <label class="secret-output">
+          <span>Neuer Token, einmalig sichtbar</span>
+          <textarea readonly rows="3">{{ mutation.token }}</textarea>
+        </label>
+      {% endif %}
+      <p>
+        Aenderung wird erst nach einem Neustart des MCP-Service aktiv.
+      </p>
+      <code>{{ restart_command }}</code>
+    </section>
+  {% endif %}
+
+  <section class="token-layout" aria-label="Tokenverwaltung">
+    <form class="action-panel" method="post" action="{{ url_for('token_create') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <h2>Neues Projekt-Token</h2>
+      <label>
+        <span>Projekt</span>
+        <input
+          name="project"
+          pattern="^[a-z0-9][a-z0-9-]*$"
+          maxlength="120"
+          autocomplete="off"
+          required
+        >
+      </label>
+      <button type="submit">Token erzeugen</button>
+    </form>
+
+    <section class="entry-section" aria-labelledby="token-list-title">
+      <h2 id="token-list-title">Aktive Projekt-Token</h2>
+      <div class="token-list">
+        {% for item in token_summaries %}
+          <article class="token-row">
+            <div>
+              <h3>{{ item.project }}</h3>
+              <p class="entry-status">Token vorhanden</p>
+            </div>
+            <form method="post" action="{{ url_for('token_rotate', project=item.project) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit">Rotieren</button>
+            </form>
+            <form method="post" action="{{ url_for('token_revoke', project=item.project) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="danger" type="submit">Entfernen</button>
+            </form>
+          </article>
+        {% else %}
+          <p class="empty-state">Noch keine Projekt-Token.</p>
+        {% endfor %}
+      </div>
+    </section>
+
+    {% if missing_token_projects %}
+      <section class="entry-section" aria-labelledby="missing-token-title">
+        <h2 id="missing-token-title">Journal-Projekte ohne Token</h2>
+        <div class="chip-list">
+          {% for project in missing_token_projects %}
+            <span>{{ project }}</span>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+  </section>
+{% endblock %}

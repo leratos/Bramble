@@ -1,8 +1,9 @@
 # Phase 4b - Admin-UI
 
-Status: Konzept (2026-05-27). Die offenen Architektur- und
-Sicherheitsentscheidungen sind in Abschnitt 10 als Decision Records
-festgehalten.
+Status: In Umsetzung (2026-05-28). Read-only MVP und Tokenverwaltung
+sind umgesetzt; append-only Journal-Aktionen bleiben der naechste
+Phase-4b-Schritt. Die offenen Architektur- und Sicherheitsentscheidungen
+sind in Abschnitt 10 als Decision Records festgehalten.
 
 Dieses Dokument beschreibt die Admin-Oberflaeche fuer Bramble. Sie soll
 die Bedienung von Projekten, Journal-Eintraegen und Projekt-Tokens
@@ -286,6 +287,7 @@ Keine MVP-Aktionen:
 * Projektansicht rechts.
 * Journal lesen und suchen.
 * Nur Loopback-Bindung.
+* Status: umgesetzt.
 
 ### Schritt 3: Append-only Journal-Aktionen
 
@@ -301,6 +303,8 @@ Keine MVP-Aktionen:
 * Token deaktivieren/loeschen.
 * Token nur einmalig anzeigen.
 * Service-Restart oder Token-Reload ausloesen bzw. klar anzeigen.
+* Status: umgesetzt mit CSRF-Schutz, atomarem `tokens.json`-Schreiben
+  und `admin_audit_events`.
 
 ### Schritt 5: Host-Haertung
 

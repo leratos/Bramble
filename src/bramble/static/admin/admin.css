@@ -55,6 +55,14 @@ button:hover {
   background: var(--accent-strong);
 }
 
+button.danger {
+  background: #9f2d2d;
+}
+
+button.danger:hover {
+  background: #6f1f1f;
+}
+
 input {
   width: 100%;
   border: 1px solid var(--line);
@@ -68,6 +76,28 @@ button:focus,
 a:focus {
   outline: 3px solid color-mix(in srgb, var(--focus) 35%, transparent);
   outline-offset: 2px;
+}
+
+code,
+textarea {
+  font: inherit;
+}
+
+code {
+  display: inline-block;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8faf7;
+  padding: 0.3rem 0.45rem;
+}
+
+textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 0.65rem 0.75rem;
 }
 
 .topbar {
@@ -213,6 +243,69 @@ a:focus {
   margin-bottom: 1.5rem;
 }
 
+.notice,
+.action-panel {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  margin-bottom: 1rem;
+  padding: 1rem;
+}
+
+.notice h2,
+.notice p,
+.action-panel h2 {
+  margin: 0;
+}
+
+.action-panel label,
+.secret-output {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 700;
+}
+
+.token-layout {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.token-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.token-row {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) auto auto;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 1rem;
+}
+
+.token-row h3,
+.token-row p {
+  margin: 0;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.chip-list span {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 0.35rem 0.55rem;
+}
+
 .metric {
   display: grid;
   gap: 0.3rem;
@@ -328,7 +421,8 @@ a:focus {
 @media (max-width: 760px) {
   .topbar,
   .app-shell,
-  .search-bar {
+  .search-bar,
+  .token-row {
     grid-template-columns: 1fr;
   }
 

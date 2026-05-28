@@ -14,16 +14,17 @@ from bramble.admin_config import (
     ENV_ADMIN_SECRET_FILE,
     AdminConfig,
 )
-from bramble.server_config import ENV_DB_PATH
+from bramble.server_config import ENV_DB_PATH, ENV_TOKENS_FILE
 
 
 class TestAdminConfigConstruction:
-    def test_defaults_are_loopback_read_only_mvp_values(self) -> None:
+    def test_defaults_are_loopback_admin_values(self) -> None:
         cfg = AdminConfig(db_path=Path("./data/bramble.db"))
 
         assert cfg.host == "127.0.0.1"
         assert cfg.port == 8770
         assert cfg.admin_secret_file == Path("./secrets/admin-ui.json")
+        assert cfg.tokens_file == Path("./secrets/tokens.json")
         assert cfg.session_idle_seconds == 1800
         assert cfg.session_absolute_seconds == 28800
         assert cfg.login_max_attempts == 5
@@ -55,6 +56,7 @@ class TestAdminConfigFromSources:
             ENV_ADMIN_HOST: "localhost",
             ENV_ADMIN_PORT: "8771",
             ENV_ADMIN_SECRET_FILE: "/opt/bramble/secrets/admin-ui.json",
+            ENV_TOKENS_FILE: "/opt/bramble/secrets/tokens.json",
             ENV_ADMIN_COOKIE_SECURE: "true",
             ENV_ADMIN_ALLOWED_HOSTS: "127.0.0.1,localhost,testserver",
         }
@@ -65,16 +67,23 @@ class TestAdminConfigFromSources:
         assert cfg.host == "localhost"
         assert cfg.port == 8771
         assert cfg.admin_secret_file == Path("/opt/bramble/secrets/admin-ui.json")
+        assert cfg.tokens_file == Path("/opt/bramble/secrets/tokens.json")
         assert cfg.cookie_secure is True
         assert cfg.allowed_hosts == ("127.0.0.1", "localhost", "testserver")
 
     def test_cli_overrides_env(self) -> None:
-        env = {ENV_ADMIN_PORT: "8771", ENV_ADMIN_SECRET_FILE: "/env/admin.json"}
+        env = {
+            ENV_ADMIN_PORT: "8771",
+            ENV_ADMIN_SECRET_FILE: "/env/admin.json",
+            ENV_TOKENS_FILE: "/env/tokens.json",
+        }
         argv = [
             "--port",
             "8772",
             "--admin-secret-file",
             "/cli/admin.json",
+            "--tokens-file",
+            "/cli/tokens.json",
             "--allowed-host",
             "testserver",
         ]
@@ -83,6 +92,7 @@ class TestAdminConfigFromSources:
 
         assert cfg.port == 8772
         assert cfg.admin_secret_file == Path("/cli/admin.json")
+        assert cfg.tokens_file == Path("/cli/tokens.json")
         assert cfg.allowed_hosts == ("testserver",)
 
     def test_rejects_public_host_from_env(self) -> None:

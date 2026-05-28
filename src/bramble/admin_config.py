@@ -9,13 +9,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from bramble.server_config import ENV_DB_PATH
+from bramble.server_config import ENV_DB_PATH, ENV_TOKENS_FILE
 
 _DEFAULT_DB_PATH = Path("./data/bramble.db")
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 8770
 _DEFAULT_LOG_LEVEL = "INFO"
 _DEFAULT_ADMIN_SECRET_FILE = Path("./secrets/admin-ui.json")
+_DEFAULT_TOKENS_FILE = Path("./secrets/tokens.json")
 _DEFAULT_SESSION_IDLE_SECONDS = 30 * 60
 _DEFAULT_SESSION_ABSOLUTE_SECONDS = 8 * 60 * 60
 _DEFAULT_LOGIN_MAX_ATTEMPTS = 5
@@ -47,6 +48,7 @@ class AdminConfig:
     port: int = _DEFAULT_PORT
     log_level: str = _DEFAULT_LOG_LEVEL
     admin_secret_file: Path = _DEFAULT_ADMIN_SECRET_FILE
+    tokens_file: Path = _DEFAULT_TOKENS_FILE
     session_idle_seconds: int = _DEFAULT_SESSION_IDLE_SECONDS
     session_absolute_seconds: int = _DEFAULT_SESSION_ABSOLUTE_SECONDS
     login_max_attempts: int = _DEFAULT_LOGIN_MAX_ATTEMPTS
@@ -60,6 +62,7 @@ class AdminConfig:
         self._validate_port()
         self._validate_log_level()
         self._validate_admin_secret_file()
+        self._validate_tokens_file()
         self._validate_positive_seconds("session_idle_seconds")
         self._validate_positive_seconds("session_absolute_seconds")
         self._validate_positive_seconds("login_window_seconds")
@@ -102,6 +105,10 @@ class AdminConfig:
     def _validate_admin_secret_file(self) -> None:
         if not isinstance(self.admin_secret_file, Path):
             raise TypeError("admin_secret_file must be a pathlib.Path")
+
+    def _validate_tokens_file(self) -> None:
+        if not isinstance(self.tokens_file, Path):
+            raise TypeError("tokens_file must be a pathlib.Path")
 
     def _validate_positive_seconds(self, field_name: str) -> None:
         value = getattr(self, field_name)
@@ -170,6 +177,11 @@ class AdminConfig:
                 env_value=environ.get(ENV_ADMIN_SECRET_FILE),
                 default=_DEFAULT_ADMIN_SECRET_FILE,
             ),
+            tokens_file=_resolve_path(
+                cli=ns.tokens_file,
+                env_value=environ.get(ENV_TOKENS_FILE),
+                default=_DEFAULT_TOKENS_FILE,
+            ),
             session_idle_seconds=_resolve_int(
                 cli=ns.session_idle_seconds,
                 env_value=environ.get(ENV_ADMIN_SESSION_IDLE_SECONDS),
@@ -211,7 +223,7 @@ class AdminConfig:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="bramble-admin",
-        description="Run the Bramble read-only admin UI.",
+        description="Run the Bramble admin UI.",
     )
     parser.add_argument("--db", help=f"Path to the SQLite database (env: {ENV_DB_PATH}).")
     parser.add_argument(
@@ -232,6 +244,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--admin-secret-file",
         dest="admin_secret_file",
         help=f"Path to admin-ui.json (env: {ENV_ADMIN_SECRET_FILE}).",
+    )
+    parser.add_argument(
+        "--tokens-file",
+        dest="tokens_file",
+        help=f"Path to tokens.json for token admin actions (env: {ENV_TOKENS_FILE}).",
     )
     parser.add_argument(
         "--session-idle-seconds",

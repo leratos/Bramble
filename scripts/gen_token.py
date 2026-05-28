@@ -29,11 +29,7 @@ Exit codes
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import re
-import secrets
-import stat
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -46,17 +42,14 @@ if SRC.exists() and str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from bramble.server_config import ENV_TOKENS_FILE  # noqa: E402  (sys.path setup above)
+from bramble.token_store import (  # noqa: E402  (sys.path setup above)
+    TokenStore,
+    load_token_map,
+    validate_project,
+    write_token_map,
+)
 
 DEFAULT_TOKENS_FILE = ROOT / "secrets" / "tokens.json"
-
-# Project identifiers follow the same kebab-case rule the MCP layer
-# enforces; checking it here stops a typo'd project from ever being
-# able to authenticate.
-_KEBAB_CASE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-
-# secrets.token_urlsafe(32) yields ~43 url-safe characters / 256 bits.
-_TOKEN_NBYTES = 32
-
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
@@ -94,56 +87,40 @@ def resolve_tokens_file(
 def load_tokens(path: Path) -> dict[str, str]:
     """Return the existing ``{project: token}`` map, or an empty one."""
 
-    if not path.exists():
-        return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        return load_token_map(path)
+    except (OSError, ValueError) as exc:
         raise SystemExit(f"error: cannot read token file {path}: {exc}") from exc
-    if not isinstance(data, dict):
-        raise SystemExit(f"error: token file {path} does not contain a JSON object")
-    return data
 
 
 def write_tokens(path: Path, tokens: dict[str, str]) -> None:
     """Atomically write the token map with owner-only permissions."""
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.parent.chmod(stat.S_IRWXU)  # 0o700
-
-    # Write to a sibling temp file, lock it down, then rename: a crash
-    # mid-write never leaves a half-written or world-readable map.
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(
-        json.dumps(tokens, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    tmp.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0o600
-    os.replace(tmp, path)
+    write_token_map(path, tokens)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     project: str = args.project
-    if not _KEBAB_CASE_RE.match(project):
+    try:
+        project = validate_project(project)
+    except ValueError as exc:
         print(
-            f"error: project {project!r} must match kebab-case pattern "
-            "^[a-z0-9][a-z0-9-]*$",
+            f"error: {exc}",
             file=sys.stderr,
         )
         return 2
 
     tokens_file = resolve_tokens_file(args.tokens_file)
-    tokens = load_tokens(tokens_file)
+    try:
+        mutation = TokenStore(tokens_file).upsert(project)
+    except (OSError, ValueError) as exc:
+        print(f"error: cannot update token file {tokens_file}: {exc}", file=sys.stderr)
+        return 2
 
-    rotated = project in tokens
-    token = secrets.token_urlsafe(_TOKEN_NBYTES)
-    tokens[project] = token
-    write_tokens(tokens_file, tokens)
-
-    verb = "rotated" if rotated else "created"
-    print(f"{verb} token for project {project!r} in {tokens_file}")
-    print(f"  {token}")
+    print(f"{mutation.action} token for project {project!r} in {tokens_file}")
+    print(f"  {mutation.token}")
     return 0
 
 

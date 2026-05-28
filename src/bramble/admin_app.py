@@ -1,8 +1,9 @@
-"""Starlette application factory for the Bramble read-only admin UI."""
+"""Starlette application factory for the Bramble admin UI."""
 
 from __future__ import annotations
 
 import re
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qs, quote
@@ -16,6 +17,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
+from bramble.admin_audit import AdminAuditLog
 from bramble.admin_auth import (
     SESSION_COOKIE_NAME,
     AdminAuthenticator,
@@ -27,6 +29,7 @@ from bramble.admin_config import AdminConfig
 from bramble.admin_read_model import AdminReadModel
 from bramble.journal_db import JournalDB
 from bramble.project_summary import ProjectSummary
+from bramble.token_store import TokenMutation, TokenStore
 
 _PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _MAX_FORM_BYTES = 8 * 1024
@@ -73,6 +76,8 @@ class _AdminContext:
     sessions: SessionStore
     login_limiter: LoginRateLimiter
     read_model: AdminReadModel
+    token_store: TokenStore
+    audit_log: AdminAuditLog
     templates: Jinja2Templates
 
 
@@ -84,10 +89,12 @@ def create_admin_app(
     sessions: SessionStore | None = None,
     login_limiter: LoginRateLimiter | None = None,
     read_model: AdminReadModel | None = None,
+    token_store: TokenStore | None = None,
+    audit_log: AdminAuditLog | None = None,
     templates_dir: Path | str | None = None,
     static_dir: Path | str | None = None,
 ) -> Starlette:
-    """Build the read-only Starlette app for ``bramble-admin``."""
+    """Build the Starlette app for ``bramble-admin``."""
 
     if not isinstance(db, JournalDB):
         raise TypeError("db must be a JournalDB")
@@ -107,6 +114,9 @@ def create_admin_app(
         window_seconds=config.login_window_seconds,
     )
     read_model = read_model or AdminReadModel(db)
+    token_store = token_store or TokenStore(config.tokens_file)
+    audit_log = audit_log or AdminAuditLog(db)
+    audit_log.initialize()
     templates = Jinja2Templates(directory=str(templates_dir))
 
     routes = [
@@ -115,6 +125,20 @@ def create_admin_app(
         Route("/login", login_submit, methods=["POST"], name="login_submit"),
         Route("/logout", logout, methods=["POST"], name="logout"),
         Route("/projects", projects_index, methods=["GET"], name="projects"),
+        Route("/tokens", tokens_index, methods=["GET"], name="tokens"),
+        Route("/tokens", token_create, methods=["POST"], name="token_create"),
+        Route(
+            "/tokens/{project:str}/rotate",
+            token_rotate,
+            methods=["POST"],
+            name="token_rotate",
+        ),
+        Route(
+            "/tokens/{project:str}/revoke",
+            token_revoke,
+            methods=["POST"],
+            name="token_revoke",
+        ),
         Route(
             "/projects/{project:str}",
             project_detail,
@@ -134,6 +158,8 @@ def create_admin_app(
         sessions=sessions,
         login_limiter=login_limiter,
         read_model=read_model,
+        token_store=token_store,
+        audit_log=audit_log,
         templates=templates,
     )
     app.add_middleware(
@@ -206,10 +232,142 @@ async def login_submit(request: Request) -> Response:
 
 async def logout(request: Request) -> Response:
     ctx = _ctx(request)
+    session = _current_session(request)
+    if session is None:
+        return _login_redirect(request)
+    form = await _read_urlencoded_form(request)
+    if not _csrf_is_valid(session, form):
+        _audit(
+            request,
+            session,
+            action="csrf.denied",
+            target_type="session",
+            target=None,
+            result="denied",
+        )
+        return PlainTextResponse("forbidden", status_code=403)
     ctx.sessions.destroy(request.cookies.get(SESSION_COOKIE_NAME))
     response = RedirectResponse(url="/login", status_code=303)
     response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
     return response
+
+
+async def tokens_index(request: Request) -> Response:
+    session = _current_session(request)
+    if session is None:
+        return _login_redirect(request)
+    return _render_tokens(request, session)
+
+
+async def token_create(request: Request) -> Response:
+    session = _current_session(request)
+    if session is None:
+        return _login_redirect(request)
+    form = await _read_urlencoded_form(request)
+    if not _csrf_is_valid(session, form):
+        _audit(
+            request,
+            session,
+            action="csrf.denied",
+            target_type="token",
+            target=form.get("project"),
+            result="denied",
+        )
+        return PlainTextResponse("forbidden", status_code=403)
+
+    project = form.get("project", "")
+    try:
+        mutation = _ctx(request).token_store.create(project)
+    except (OSError, TypeError, ValueError) as exc:
+        _audit(
+            request,
+            session,
+            action="token.create",
+            target_type="token",
+            target=project.strip() or None,
+            result="denied",
+            details={"reason": str(exc)},
+        )
+        return _render_tokens(request, session, error=str(exc), status_code=400)
+
+    _audit_token_mutation(request, session, "token.create", mutation)
+    return _render_tokens(request, session, mutation=mutation)
+
+
+async def token_rotate(request: Request) -> Response:
+    session = _current_session(request)
+    if session is None:
+        return _login_redirect(request)
+    project = request.path_params["project"]
+    if not _PROJECT_RE.fullmatch(project):
+        return PlainTextResponse("unknown project", status_code=404)
+
+    form = await _read_urlencoded_form(request)
+    if not _csrf_is_valid(session, form):
+        _audit(
+            request,
+            session,
+            action="csrf.denied",
+            target_type="token",
+            target=project,
+            result="denied",
+        )
+        return PlainTextResponse("forbidden", status_code=403)
+
+    try:
+        mutation = _ctx(request).token_store.rotate(project)
+    except (OSError, ValueError) as exc:
+        _audit(
+            request,
+            session,
+            action="token.rotate",
+            target_type="token",
+            target=project,
+            result="denied",
+            details={"reason": str(exc)},
+        )
+        return _render_tokens(request, session, error=str(exc), status_code=400)
+
+    _audit_token_mutation(request, session, "token.rotate", mutation)
+    return _render_tokens(request, session, mutation=mutation)
+
+
+async def token_revoke(request: Request) -> Response:
+    session = _current_session(request)
+    if session is None:
+        return _login_redirect(request)
+    project = request.path_params["project"]
+    if not _PROJECT_RE.fullmatch(project):
+        return PlainTextResponse("unknown project", status_code=404)
+
+    form = await _read_urlencoded_form(request)
+    if not _csrf_is_valid(session, form):
+        _audit(
+            request,
+            session,
+            action="csrf.denied",
+            target_type="token",
+            target=project,
+            result="denied",
+        )
+        return PlainTextResponse("forbidden", status_code=403)
+
+    try:
+        mutation = _ctx(request).token_store.revoke(project)
+    except (OSError, ValueError) as exc:
+        _audit(
+            request,
+            session,
+            action="token.revoke",
+            target_type="token",
+            target=project,
+            result="denied",
+            details={"reason": str(exc)},
+        )
+        return _render_tokens(request, session, error=str(exc), status_code=400)
+
+    _audit_token_mutation(request, session, "token.revoke", mutation)
+    return _render_tokens(request, session, mutation=mutation)
 
 
 async def dashboard(request: Request) -> Response:
@@ -226,6 +384,7 @@ async def dashboard(request: Request) -> Response:
             "actor": session.actor,
             "projects": _project_rows(projects),
             "active_project": None,
+            "csrf_token": session.csrf_token,
             "stats": stats,
         },
     )
@@ -278,6 +437,7 @@ async def project_detail(request: Request) -> Response:
             "actor": session.actor,
             "projects": _project_rows(projects),
             "active_project": project,
+            "csrf_token": session.csrf_token,
             "summary": summary,
             "entries": entries,
             "query": query,
@@ -305,6 +465,44 @@ def _login_redirect(request: Request) -> RedirectResponse:
     )
 
 
+def _render_tokens(
+    request: Request,
+    session: AdminSession,
+    *,
+    mutation: TokenMutation | None = None,
+    error: str | None = None,
+    status_code: int = 200,
+) -> Response:
+    ctx = _ctx(request)
+    projects = ctx.read_model.projects()
+    token_status_code = status_code
+    try:
+        token_summaries = ctx.token_store.list_tokens()
+    except ValueError as exc:
+        token_summaries = []
+        error = error or f"Token-Datei konnte nicht gelesen werden: {exc}"
+        token_status_code = max(status_code, 500)
+    token_projects = {summary.project for summary in token_summaries}
+    journal_projects = {project.name for project in projects}
+    missing_token_projects = sorted(journal_projects - token_projects)
+    return _render(
+        request,
+        "tokens.html",
+        {
+            "actor": session.actor,
+            "csrf_token": session.csrf_token,
+            "projects": _project_rows(projects),
+            "active_project": None,
+            "token_summaries": token_summaries,
+            "missing_token_projects": missing_token_projects,
+            "mutation": mutation,
+            "error": error,
+            "restart_command": "sudo systemctl restart bramble",
+        },
+        status_code=token_status_code,
+    )
+
+
 def _render(
     request: Request,
     template_name: str,
@@ -317,6 +515,49 @@ def _render(
         template_name,
         context,
         status_code=status_code,
+    )
+
+
+def _csrf_is_valid(session: AdminSession, form: dict[str, str]) -> bool:
+    token = form.get("csrf_token", "")
+    return secrets.compare_digest(token, session.csrf_token)
+
+
+def _audit_token_mutation(
+    request: Request,
+    session: AdminSession,
+    action: str,
+    mutation: TokenMutation,
+) -> None:
+    _audit(
+        request,
+        session,
+        action=action,
+        target_type="token",
+        target=mutation.project,
+        result="success",
+        details={"mutation": mutation.action},
+    )
+
+
+def _audit(
+    request: Request,
+    session: AdminSession,
+    *,
+    action: str,
+    target_type: str,
+    target: str | None,
+    result: str,
+    details: dict[str, object] | None = None,
+) -> None:
+    _ctx(request).audit_log.append(
+        actor=session.actor,
+        action=action,
+        target_type=target_type,
+        target=target,
+        result=result,
+        client_ip=_client_ip(request),
+        details=details,
     )
 
 

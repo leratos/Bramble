@@ -172,6 +172,11 @@ chmod 600 /opt/bramble/secrets/admin-ui.json
 chown bramble:bramble /opt/bramble/secrets/admin-ui.json
 ```
 
+Die Admin-UI verwendet dieselbe Token-Datei wie der MCP-Service:
+`/opt/bramble/secrets/tokens.json`. Sie wird in Abschnitt 4 angelegt
+und bleibt Besitzer `bramble:bramble`, damit die Tokenverwaltung
+atomar ueber eine temporaere Nachbardatei schreiben kann.
+
 Unit installieren und starten:
 
 ```sh
@@ -198,6 +203,8 @@ Erwartung:
 * `ss` zeigt ausschließlich `127.0.0.1:8770`, nicht `0.0.0.0:8770`.
 * `/` antwortet ohne Login mit `303` nach `/login?next=/`.
 * `/login` antwortet mit `200`.
+* Nach Login ist `/tokens` erreichbar; bestehende Tokenwerte werden
+  nicht angezeigt.
 * Es gibt keinen Plesk-/Nginx-Pfad wie `/admin`.
 
 Lokaler Zugriff vom eigenen Rechner:
@@ -418,13 +425,24 @@ curl -s -X POST https://journal.last-strawberry.com/mcp/ \
 
 ## 10. Token-Rotation und -Sperre
 
-* **Rotieren:** `scripts/gen_token.py <projekt>` erneut aufrufen –
-  überschreibt das Token des Projekts. Danach
-  `systemctl restart bramble` (die Token-Datei wird beim Start
-  gelesen). Das neue Token im KI-Tool eintragen.
-* **Sperren:** Den Projekt-Eintrag aus
-  `/opt/bramble/secrets/tokens.json` entfernen, dann
-  `systemctl restart bramble`.
+Bevorzugter Weg ab Phase 4b: per SSH-Tunnel in der Admin-UI unter
+`/tokens`.
+
+* **Erzeugen:** Projektname eintragen. Der neue Token wird genau in
+  dieser Antwort einmalig angezeigt.
+* **Rotieren:** Projekt in der Liste waehlen und "Rotieren" ausloesen.
+  Der neue Token wird einmalig angezeigt.
+* **Sperren:** Projekt in der Liste waehlen und "Entfernen" ausloesen.
+* **Aktivieren:** Danach immer `systemctl restart bramble`, weil der
+  MCP-Service `/opt/bramble/secrets/tokens.json` beim Start liest.
+
+Fallback ohne Admin-UI:
+
+```sh
+sudo -u bramble BRAMBLE_TOKENS_FILE=/opt/bramble/secrets/tokens.json \
+    /opt/bramble/.venv/bin/python /opt/bramble/scripts/gen_token.py <projekt>
+systemctl restart bramble
+```
 
 ---
 

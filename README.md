@@ -139,7 +139,7 @@ Priorität: CLI-Argument > Umgebungsvariable > Default.
 Logs werden als JSON auf stderr geschrieben (stdout ist beim stdio-Transport
 für das MCP-Protokoll reserviert).
 
-### Admin-UI (Phase 4b read-only MVP)
+### Admin-UI (Phase 4b)
 
 Der separate Admin-Server rendert Starlette/Jinja2-Views und bindet per
 Default nur an `127.0.0.1:8770`. Zugriff ist fuer den Betrieb per
@@ -156,13 +156,21 @@ Danach:
 
 ```bash
 bramble-admin --db ./data/bramble.db \
-    --admin-secret-file ./secrets/admin-ui.json
+    --admin-secret-file ./secrets/admin-ui.json \
+    --tokens-file ./secrets/tokens.json
 ```
 
-Die MVP-Views sind read-only: Dashboard, Projektliste, Projektansicht
-und Projektsuche. Login-Sessions bleiben serverseitig, das Cookie ist
-`HttpOnly` und `SameSite=Strict`; fehlende oder ungueltige Secrets
-brechen den Start ab.
+Die UI zeigt Dashboard, Projektliste, Projektansicht und Projektsuche.
+Zusaetzlich kann sie Projekt-Tokens erzeugen, rotieren und entfernen.
+Bestehende Tokenwerte werden nie angezeigt; neue oder rotierte Tokens
+erscheinen nur direkt in der Antwort dieser Aktion. Nach Token-
+Aenderungen muss `bramble.service` neu gestartet werden, weil der
+MCP-Server die Token-Datei beim Start liest.
+
+Schreibende Admin-Aktionen sind CSRF-geschuetzt und werden in der
+append-only Tabelle `admin_audit_events` protokolliert. Login-Sessions
+bleiben serverseitig, das Cookie ist `HttpOnly` und `SameSite=Strict`;
+fehlende oder ungueltige Secrets brechen den Start ab.
 
 ### DB ohne Server vorbereiten
 

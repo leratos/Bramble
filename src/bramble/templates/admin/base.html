@@ -15,8 +15,10 @@
       <nav aria-label="Hauptnavigation">
         <a href="{{ url_for('dashboard') }}">Dashboard</a>
         <a href="{{ url_for('projects') }}">Projekte</a>
+        <a href="{{ url_for('tokens') }}">Token</a>
       </nav>
       <form class="logout-form" method="post" action="{{ url_for('logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <span>{{ actor }}</span>
         <button type="submit">Logout</button>
       </form>

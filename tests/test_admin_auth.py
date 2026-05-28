@@ -97,6 +97,20 @@ class TestSessionStore:
         now = 1101.0
         assert store.get(session_id) is None
 
+    def test_session_stores_distinct_csrf_token(self) -> None:
+        store = SessionStore(
+            idle_seconds=10,
+            absolute_seconds=100,
+            token_factory=lambda: "sid",
+            csrf_token_factory=lambda: "csrf",
+        )
+
+        session_id = store.create("admin")
+
+        session = store.get(session_id)
+        assert session is not None
+        assert session.csrf_token == "csrf"
+
 
 class TestLoginRateLimiter:
     def test_blocks_after_failed_attempt_budget(self) -> None:

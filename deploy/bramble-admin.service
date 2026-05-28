@@ -1,4 +1,4 @@
-# systemd unit for the Bramble admin UI (Phase-4b read-only MVP).
+# systemd unit for the Bramble admin UI (Phase-4b).
 #
 # Install: copy to /etc/systemd/system/bramble-admin.service, then
 #   systemctl daemon-reload && systemctl enable --now bramble-admin
@@ -27,6 +27,7 @@ Environment=BRAMBLE_ADMIN_HOST=127.0.0.1
 Environment=BRAMBLE_ADMIN_PORT=8770
 Environment=BRAMBLE_ADMIN_LOG_LEVEL=INFO
 Environment=BRAMBLE_ADMIN_SECRET_FILE=/opt/bramble/secrets/admin-ui.json
+Environment=BRAMBLE_TOKENS_FILE=/opt/bramble/secrets/tokens.json
 Environment=BRAMBLE_ADMIN_SESSION_IDLE_SECONDS=1800
 Environment=BRAMBLE_ADMIN_SESSION_ABSOLUTE_SECONDS=28800
 Environment=BRAMBLE_ADMIN_LOGIN_MAX_ATTEMPTS=5
@@ -35,14 +36,16 @@ Environment=BRAMBLE_ADMIN_COOKIE_SECURE=false
 Environment=BRAMBLE_ADMIN_ALLOWED_HOSTS=127.0.0.1,localhost
 
 # Hardening. The admin UI is intentionally reachable only through an
-# SSH tunnel to 127.0.0.1:8770. It reads the SQLite DB and the admin
-# secret; /opt/bramble/data is writable only so SQLite can manage WAL
-# sidecars while AdminReadModel sets PRAGMA query_only for reads.
+# SSH tunnel to 127.0.0.1:8770. /opt/bramble/data is writable so
+# SQLite can manage WAL sidecars and the admin audit table. The secrets
+# directory is writable because token management updates tokens.json
+# atomically through a sibling temp file; templates never display
+# existing token values.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/bramble/data
+ReadWritePaths=/opt/bramble/data /opt/bramble/secrets
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
