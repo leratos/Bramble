@@ -56,6 +56,113 @@ def test_parse_journal_text_extracts_entries_and_dates() -> None:
     assert second.timestamp == datetime(2026, 5, 13, 9, 30, tzinfo=UTC)
 
 
+def test_parse_accepts_date_in_heading_and_removes_it_from_title() -> None:
+    text = """## Abgeschlossen: Phase 75b -- Repo-Hygiene (2026-05-01)
+- Branch: feature/phase-75b
+
+Body.
+"""
+    result = import_journal_txt.parse_journal_text(text)
+
+    assert result.issues == []
+    assert len(result.entries) == 1
+    entry = result.entries[0]
+    assert entry.status is JournalStatus.ABGESCHLOSSEN
+    assert entry.title == "Phase 75b -- Repo-Hygiene"
+    assert entry.phase == "Phase 75b"
+    assert entry.timestamp == datetime(2026, 5, 1, 12, 0, tzinfo=UTC)
+
+
+def test_parse_accepts_bulleted_date_line() -> None:
+    text = """## Abgeschlossen: Konzept-Phase 92 -- Multi-Stop-Routing
+
+- Datum: 2026-05-13
+- Branch: feature/phase-92
+
+Body.
+"""
+    result = import_journal_txt.parse_journal_text(text)
+
+    assert result.issues == []
+    assert result.entries[0].timestamp == datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    assert "Datum:" not in result.entries[0].content
+
+
+def test_parse_accepts_elder_berry_status_labels() -> None:
+    text = """## Korrektur: Phase 80 Etappe 2 -- CodeQL-Findings (2026-05-09)
+Body.
+
+## Nachtrag: Phase-91-PR -- Review-Anmerkungen (2026-05-18)
+Body.
+
+## Stand: Hotfix Tower-Update -- Code geschrieben (2026-05-05)
+Body.
+
+## Abschluss: Phase 76b komplett auf main (2026-05-05)
+Body.
+"""
+    result = import_journal_txt.parse_journal_text(text)
+
+    assert result.issues == []
+    assert [entry.status for entry in result.entries] == [
+        JournalStatus.BUGFIX,
+        JournalStatus.NOTIZ,
+        JournalStatus.NOTIZ,
+        JournalStatus.ABGESCHLOSSEN,
+    ]
+
+
+def test_parse_merges_metadata_headings_into_current_section() -> None:
+    text = """================================================
+2026-05-13 Phase 92 -- Multi-Stop-Routing
+================================================
+
+## In Arbeit: Konzept-Phase 92 -- Multi-Stop-Routing
+## Naechster Schritt: docs/concepts/phase-92.md
+## Branch: feature/phase-92
+
+Body.
+"""
+    result = import_journal_txt.parse_journal_text(text)
+
+    assert result.issues == []
+    assert len(result.entries) == 1
+    entry = result.entries[0]
+    assert entry.timestamp == datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    assert "Naechster Schritt: docs/concepts/phase-92.md" in entry.content
+    assert "Branch: feature/phase-92" in entry.content
+
+
+def test_parse_skips_empty_heading_only_sections() -> None:
+    text = """## Abgeschlossen: Duplicate Heading (2026-05-10)
+
+## Abgeschlossen: Real Heading (2026-05-10)
+Body.
+"""
+    result = import_journal_txt.parse_journal_text(text)
+
+    assert result.issues == []
+    assert len(result.entries) == 1
+    assert result.entries[0].title == "Real Heading"
+
+
+def test_parse_uses_nearest_dated_section_for_undated_notes() -> None:
+    text = """## Abgeschlossen: Phase 80 Etappe 1 (2026-05-08)
+Body.
+
+## Hinweis fuer Etappe 2 (Phase 80, separate Session)
+Follow-up.
+
+## In Arbeit: Phase 80 Etappe 2 (2026-05-08)
+Body.
+"""
+    result = import_journal_txt.parse_journal_text(text)
+
+    assert result.issues == []
+    assert result.entries[1].status is JournalStatus.NOTIZ
+    assert result.entries[1].timestamp == datetime(2026, 5, 8, 12, 0, tzinfo=UTC)
+
+
 def test_parse_infers_in_progress_for_phase_heading_with_open_work() -> None:
     text = """## Phase 3 (Deployment): Code umgesetzt, Host-Deploy offen
 Datum: 2026-05-19 (UTC)

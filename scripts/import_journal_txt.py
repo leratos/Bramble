@@ -39,7 +39,10 @@ _KEBAB_CASE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _DATE_RE = re.compile(
     r"(?P<date>\d{4}-\d{2}-\d{2})(?:[ T](?P<clock>\d{2}:\d{2}(?::\d{2})?))?"
 )
-_PHASE_RE = re.compile(r"\bPhase[- ](?P<number>\d+)\b", re.IGNORECASE)
+_PHASE_RE = re.compile(
+    r"\bPhase[- ](?P<number>\d+(?:[a-z]|(?:\.[0-9a-z]+))?)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +99,7 @@ class _Section:
     line_no: int
     heading: str
     body_lines: list[str]
+    context_timestamp: datetime | None = None
 
 
 def parse_journal_file(path: Path) -> ParseResult:
@@ -109,9 +113,18 @@ def parse_journal_text(text: str) -> ParseResult:
 
     entries: list[ParsedJournalEntry] = []
     issues: list[ParseIssue] = []
+    sections = _split_sections(text)
+    section_timestamps = [_section_timestamp(section) for section in sections]
 
-    for section in _split_sections(text):
-        entry, section_issues = _parse_section(section)
+    for index, section in enumerate(sections):
+        entry, section_issues = _parse_section(
+            section,
+            fallback_timestamp=_nearest_timestamp(
+                index=index,
+                sections=sections,
+                timestamps=section_timestamps,
+            ),
+        )
         issues.extend(section_issues)
         if entry is not None:
             entries.append(entry)
@@ -262,28 +275,46 @@ def main(argv: list[str] | None = None) -> int:
 def _split_sections(text: str) -> list[_Section]:
     sections: list[_Section] = []
     current_heading: str | None = None
+    current_context_timestamp: datetime | None = None
+    pending_context_timestamp: datetime | None = None
     current_line = 0
     body: list[str] = []
 
     for line_no, line in enumerate(text.splitlines(), start=1):
         if line.startswith("## "):
+            heading = line[3:].strip()
+            if current_heading is not None and _is_metadata_heading(heading):
+                body.append(heading)
+                continue
             if current_heading is not None:
                 sections.append(
                     _Section(
                         line_no=current_line,
                         heading=current_heading,
                         body_lines=body,
+                        context_timestamp=current_context_timestamp,
                     )
                 )
-            current_heading = line[3:].strip()
+            current_heading = heading
+            current_context_timestamp = pending_context_timestamp
+            pending_context_timestamp = None
             current_line = line_no
             body = []
+        elif line.startswith("="):
+            continue
+        elif (context_timestamp := _parse_context_timestamp(line)) is not None:
+            pending_context_timestamp = context_timestamp
         elif current_heading is not None:
             body.append(line)
 
     if current_heading is not None:
         sections.append(
-            _Section(line_no=current_line, heading=current_heading, body_lines=body)
+            _Section(
+                line_no=current_line,
+                heading=current_heading,
+                body_lines=body,
+                context_timestamp=current_context_timestamp,
+            )
         )
 
     return sections
@@ -291,6 +322,8 @@ def _split_sections(text: str) -> list[_Section]:
 
 def _parse_section(
     section: _Section,
+    *,
+    fallback_timestamp: datetime | None = None,
 ) -> tuple[ParsedJournalEntry | None, list[ParseIssue]]:
     issues: list[ParseIssue] = []
 
@@ -308,6 +341,12 @@ def _parse_section(
 
     date_index, timestamp = _find_timestamp(section.body_lines)
     if timestamp is None:
+        timestamp = _timestamp_from_heading(section.heading)
+    if timestamp is None:
+        timestamp = section.context_timestamp
+    if timestamp is None:
+        timestamp = fallback_timestamp
+    if timestamp is None:
         issues.append(
             ParseIssue(
                 source_line=section.line_no,
@@ -322,13 +361,6 @@ def _parse_section(
     ]
     content = "\n".join(content_lines).strip()
     if not content:
-        issues.append(
-            ParseIssue(
-                source_line=section.line_no,
-                heading=section.heading,
-                message="section body is empty after removing Datum line",
-            )
-        )
         return None, issues
 
     return (
@@ -336,7 +368,7 @@ def _parse_section(
             source_line=section.line_no,
             status=status,
             timestamp=timestamp,
-            title=title,
+            title=_strip_heading_timestamp(title),
             phase=_derive_phase(title),
             content=content,
         ),
@@ -364,8 +396,16 @@ def _status_from_label(label: str) -> JournalStatus | None:
     return {
         "in arbeit": JournalStatus.IN_ARBEIT,
         "abgeschlossen": JournalStatus.ABGESCHLOSSEN,
+        "abschluss": JournalStatus.ABGESCHLOSSEN,
         "bugfix": JournalStatus.BUGFIX,
+        "hotfix": JournalStatus.BUGFIX,
+        "hotfix-reparatur": JournalStatus.BUGFIX,
+        "korrektur": JournalStatus.BUGFIX,
         "notiz": JournalStatus.NOTIZ,
+        "nachtrag": JournalStatus.NOTIZ,
+        "stand": JournalStatus.NOTIZ,
+        "update": JournalStatus.NOTIZ,
+        "konzept": JournalStatus.NOTIZ,
     }.get(normalised)
 
 
@@ -375,13 +415,22 @@ def _infer_status_from_unprefixed_heading(heading: str) -> JournalStatus | None:
         "offen" in lower or "code umgesetzt" in lower or "in arbeit" in lower
     ):
         return JournalStatus.IN_ARBEIT
+    if lower.startswith("hinweis"):
+        return JournalStatus.NOTIZ
+    if "merged in main" in lower or "gemerged in main" in lower:
+        return JournalStatus.ABGESCHLOSSEN
+    if "hotfix" in lower or "pr-review-fix" in lower or "review-fix" in lower:
+        return JournalStatus.BUGFIX
     return None
 
 
 def _find_timestamp(body_lines: list[str]) -> tuple[int | None, datetime | None]:
     for index, line in enumerate(body_lines):
-        if line.startswith("Datum:"):
-            return index, _parse_timestamp(line)
+        normalised = line.strip()
+        if normalised.startswith("- "):
+            normalised = normalised[2:].strip()
+        if normalised.startswith("Datum:"):
+            return index, _parse_timestamp(normalised)
     return None, None
 
 
@@ -401,6 +450,60 @@ def _parse_timestamp(line: str) -> datetime | None:
         return datetime.fromisoformat(f"{date_part}T{clock}").replace(tzinfo=UTC)
     except ValueError:
         return None
+
+
+def _timestamp_from_heading(heading: str) -> datetime | None:
+    return _parse_timestamp(heading)
+
+
+def _parse_context_timestamp(line: str) -> datetime | None:
+    stripped = line.strip()
+    if not _DATE_RE.match(stripped):
+        return None
+    return _parse_timestamp(stripped)
+
+
+def _section_timestamp(section: _Section) -> datetime | None:
+    _, body_timestamp = _find_timestamp(section.body_lines)
+    if body_timestamp is not None:
+        return body_timestamp
+    heading_timestamp = _timestamp_from_heading(section.heading)
+    if heading_timestamp is not None:
+        return heading_timestamp
+    return section.context_timestamp
+
+
+def _nearest_timestamp(
+    *,
+    index: int,
+    sections: list[_Section],
+    timestamps: list[datetime | None],
+) -> datetime | None:
+    nearest: tuple[int, datetime] | None = None
+    source_line = sections[index].line_no
+    for other_index, timestamp in enumerate(timestamps):
+        if timestamp is None or other_index == index:
+            continue
+        distance = abs(sections[other_index].line_no - source_line)
+        if nearest is None or distance < nearest[0]:
+            nearest = (distance, timestamp)
+    if nearest is None:
+        return None
+    return nearest[1]
+
+
+def _strip_heading_timestamp(title: str) -> str:
+    stripped = re.sub(
+        r"\s*\(\s*\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?\s*\)\s*$",
+        "",
+        title,
+    ).strip()
+    return stripped or title.strip()
+
+
+def _is_metadata_heading(heading: str) -> bool:
+    prefix = heading.split(":", 1)[0].strip().casefold()
+    return prefix in {"branch", "naechster schritt"}
 
 
 def _derive_phase(title: str) -> str | None:

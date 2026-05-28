@@ -33,7 +33,9 @@ Projekt wird deshalb weiterhin erst ein Dry-Run gemacht.
    Import entfernen. ✅
 3. Bramble als Journal-Tool für KI-Clients konfigurieren. ✅
 4. Elder-Berry importieren.
-   **Aktueller Schritt.**
+   **Aktueller Schritt.** Lokaler Dry-Run gegen
+   `C:\Dev\Elder-Berry\docs\journal.txt` ist parsebar:
+   `174 entries`, `0 issues`.
 5. Weitere Projekte projektweise ergänzen: Bull-Berry, Berry-Gym,
    Last-Strawberry und spätere Repos.
 
@@ -70,6 +72,13 @@ Eigenschaften:
   übersprungen, damit ein versehentlicher zweiter Import keine
   Duplikate erzeugt. `--allow-duplicates` ist nur für bewusste
   Sonderfälle gedacht.
+* Elder-Berry-Legacy-Format wird unterstuetzt:
+  * Datum im Heading, z. B. `(2026-05-10)`.
+  * `- Datum: YYYY-MM-DD` im Body.
+  * zusaetzliche Statuslabels wie `Hotfix`, `Korrektur`, `Nachtrag`,
+    `Stand`, `Update`, `Konzept`, `Abschluss`.
+  * Metadaten-Headings `## Branch:` und `## Naechster Schritt:` werden
+    als Body-Metadaten des aktuellen Abschnitts behandelt.
 
 Dry-Run für Brambles eigenes Journal auf dem Host:
 
