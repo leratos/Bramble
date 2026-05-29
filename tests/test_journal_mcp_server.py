@@ -160,6 +160,7 @@ class TestToolRegistry:
         names = sorted(t.name for t in tools)
         assert names == [
             "journal_append",
+            "journal_digest",
             "journal_list_projects",
             "journal_read",
             "journal_search",
@@ -647,6 +648,118 @@ class TestJournalSearchAll:
                 await client.call_tool(
                     "journal_search_all",
                     {"query": "x", "limit": 101},
+                )
+
+
+# ---------------------------------------------------------------------------
+# journal_digest
+# ---------------------------------------------------------------------------
+class TestJournalDigest:
+    async def test_happy_path_returns_structured_digest(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        now = datetime.now(tz=UTC)
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content="open digest work",
+                timestamp=now - timedelta(hours=1),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.BUGFIX,
+                title="Decision: digest shape",
+                content="bugfix digest work",
+                tags=["decision"],
+                timestamp=now - timedelta(hours=2),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="berry-gym",
+                status=JournalStatus.NOTIZ,
+                content="old digest work",
+                timestamp=now - timedelta(days=40),
+            )
+        )
+
+        async with Client(server.app) as client:
+            result = await client.call_tool("journal_digest", {"since": "24h"})
+
+        assert result.data["projects"] == ["bramble", "elder-berry"]
+        assert result.data["counts_by_project"] == {
+            "bramble": 1,
+            "elder-berry": 1,
+        }
+        assert result.data["counts_by_status"] == {"bugfix": 1, "in_arbeit": 1}
+        assert [row["content"] for row in result.data["entries"]] == [
+            "open digest work",
+            "bugfix digest work",
+        ]
+        assert [row["content"] for row in result.data["open_items"]] == [
+            "open digest work"
+        ]
+        assert [row["content"] for row in result.data["bugfixes"]] == [
+            "bugfix digest work"
+        ]
+        assert [row["content"] for row in result.data["decisions"]] == [
+            "bugfix digest work"
+        ]
+        assert set(result.data["range"]) == {"since", "until"}
+
+    async def test_filters_project_and_tags(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        now = datetime.now(tz=UTC)
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="deploy digest",
+                tags=["deploy"],
+                timestamp=now - timedelta(hours=1),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.NOTIZ,
+                content="deploy other",
+                tags=["deploy"],
+                timestamp=now - timedelta(hours=2),
+            )
+        )
+
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_digest",
+                {"project": "bramble", "since": "24h", "tags": ["Deploy"]},
+            )
+
+        assert [row["content"] for row in result.data["entries"]] == [
+            "deploy digest"
+        ]
+        assert result.data["counts_by_project"] == {"bramble": 1}
+
+    async def test_rejects_non_kebab_case_project(
+        self, server: JournalMCPServer
+    ) -> None:
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="kebab-case"):
+                await client.call_tool(
+                    "journal_digest",
+                    {"project": "Bad", "since": "24h"},
+                )
+
+    async def test_rejects_invalid_range(self, server: JournalMCPServer) -> None:
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="since"):
+                await client.call_tool(
+                    "journal_digest",
+                    {"since": "yesterday"},
                 )
 
 

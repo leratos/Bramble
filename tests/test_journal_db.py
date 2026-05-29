@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from bramble.journal_db import JournalDB
+from bramble.journal_digest import JournalDigest
 from bramble.journal_entry import JournalEntry, JournalEntryLink, JournalStatus
 from bramble.project_summary import ProjectSummary
 
@@ -407,6 +408,147 @@ class TestSearchAll:
     def test_search_all_rejects_invalid_status_filter(self, db: JournalDB) -> None:
         with pytest.raises(ValueError, match="status"):
             db.search_all("keyword", statuses=["done"])
+
+
+# ---------------------------------------------------------------------------
+# digest()
+# ---------------------------------------------------------------------------
+class TestDigest:
+    def test_digest_aggregates_range_counts_and_categories(
+        self, db: JournalDB
+    ) -> None:
+        now = datetime(2026, 5, 29, 12, 0, tzinfo=UTC)
+        decision = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                title="Decision: keep FTS",
+                content="decision payload",
+                tags=["decision"],
+                timestamp=now - timedelta(hours=1),
+            )
+        )
+        bugfix = db.append(
+            _entry(
+                project="elder-berry",
+                status=JournalStatus.BUGFIX,
+                content="bug fixed",
+                timestamp=now - timedelta(hours=2),
+            )
+        )
+        open_item = db.append(
+            _entry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content="open work",
+                timestamp=now - timedelta(hours=3),
+            )
+        )
+        db.append(
+            _entry(
+                project="berry-gym",
+                content="old work",
+                timestamp=now - timedelta(days=40),
+            )
+        )
+
+        digest = db.digest(since="7d", now=now)
+
+        assert isinstance(digest, JournalDigest)
+        assert digest.range_since == now - timedelta(days=7)
+        assert digest.range_until == now
+        assert digest.projects == ("bramble", "elder-berry")
+        assert digest.counts_by_project == {"bramble": 2, "elder-berry": 1}
+        assert digest.counts_by_status == {
+            "bugfix": 1,
+            "in_arbeit": 1,
+            "notiz": 1,
+        }
+        assert [entry.id for entry in digest.entries] == [
+            decision.id,
+            bugfix.id,
+            open_item.id,
+        ]
+        assert [entry.id for entry in digest.open_items] == [open_item.id]
+        assert [entry.id for entry in digest.bugfixes] == [bugfix.id]
+        assert [entry.id for entry in digest.decisions] == [decision.id]
+
+    def test_digest_filters_project_and_tags(self, db: JournalDB) -> None:
+        now = datetime(2026, 5, 29, 12, 0, tzinfo=UTC)
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="deploy payload",
+                tags=["deploy", "decision"],
+                timestamp=now - timedelta(hours=1),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="untagged payload",
+                timestamp=now - timedelta(hours=2),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.NOTIZ,
+                content="deploy elsewhere",
+                tags=["deploy"],
+                timestamp=now - timedelta(hours=3),
+            )
+        )
+
+        digest = db.digest(project="bramble", since="24h", tags=["Deploy"], now=now)
+
+        assert [entry.content for entry in digest.entries] == ["deploy payload"]
+        assert digest.counts_by_project == {"bramble": 1}
+
+    def test_digest_accepts_iso_range(self, db: JournalDB) -> None:
+        now = datetime(2026, 5, 29, 12, 0, tzinfo=UTC)
+        db.append(_entry(content="inside", timestamp=now - timedelta(minutes=30)))
+        db.append(_entry(content="outside", timestamp=now - timedelta(hours=3)))
+
+        digest = db.digest(
+            since="2026-05-29T11:00:00+00:00",
+            until="2026-05-29T12:00:00+00:00",
+            now=now,
+        )
+
+        assert [entry.content for entry in digest.entries] == ["inside"]
+
+    def test_digest_respects_limit(self, db: JournalDB) -> None:
+        now = datetime(2026, 5, 29, 12, 0, tzinfo=UTC)
+        for i in range(5):
+            db.append(
+                _entry(
+                    content=f"entry-{i}",
+                    timestamp=now - timedelta(minutes=i),
+                )
+            )
+
+        digest = db.digest(since="24h", limit=2, now=now)
+
+        assert len(digest.entries) == 2
+        assert digest.counts_by_project == {"bramble": 5}
+
+    def test_digest_rejects_invalid_since(self, db: JournalDB) -> None:
+        with pytest.raises(ValueError, match="since"):
+            db.digest(since="yesterday")
+
+    def test_digest_rejects_until_before_since(self, db: JournalDB) -> None:
+        with pytest.raises(ValueError, match="until"):
+            db.digest(
+                since="2026-05-29T12:00:00+00:00",
+                until="2026-05-29T11:00:00+00:00",
+            )
+
+    def test_digest_caps_limit(self, db: JournalDB) -> None:
+        with pytest.raises(ValueError, match="at most 100"):
+            db.digest(limit=101)
 
 
 # ---------------------------------------------------------------------------

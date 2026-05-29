@@ -64,7 +64,7 @@ synchronisiert über drei Trigger (insert/update/delete).
 
 ### MCP-Tools
 
-Fuenf Tools auf dem `JournalMCPServer`, jedes mit `ToolError`-konformer
+Sechs Tools auf dem `JournalMCPServer`, jedes mit `ToolError`-konformer
 Fehlerübersetzung:
 
 | Tool | Zweck |
@@ -72,7 +72,8 @@ Fehlerübersetzung:
 | `journal_read(project, n=80)` | Neueste `n` Einträge für ein Projekt, neueste zuerst |
 | `journal_append(project, status, content, phase=None, title=None)` | Neuen Eintrag schreiben; Timestamp wird serverseitig gesetzt |
 | `journal_search(project, query, limit=20)` | FTS5-Volltextsuche, MATCH-Syntax durchgereicht |
-| `journal_search_all(query, limit=20, projects=None, statuses=None, tags=None)` | Projektuebergreifende FTS5-Suche mit optionalen Filtern, maximal 100 Treffer |
+| `journal_search_all(...)` | Projektuebergreifende FTS5-Suche mit optionalen Filtern, maximal 100 Treffer |
+| `journal_digest(...)` | Strukturierter Zeitraum-Digest mit Counts und kuratierten Entry-Listen |
 | `journal_list_projects()` | `(project, entry_count, last_timestamp)` pro Projekt, neueste Aktivität zuerst |
 
 Projekt-Identifier müssen im MCP-Layer kebab-case sein
