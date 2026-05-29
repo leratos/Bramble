@@ -233,9 +233,8 @@ class AdminReadModel:
     def workflow_guidance(self) -> WorkflowGuidance:
         """Return conservative phase-4e workflow defaults.
 
-        The admin UI stays read-only for journal entries. These hints help
-        operators and agents create consistent append-only entries via MCP
-        clients while reviewing context in the UI.
+        These hints help operators and agents create consistent append-only
+        entries via MCP clients or the admin correction assistant.
         """
 
         return WorkflowGuidance(

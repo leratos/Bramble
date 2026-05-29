@@ -29,12 +29,17 @@ from bramble.admin_config import AdminConfig
 from bramble.admin_read_model import AdminReadModel
 from bramble.admin_time import format_display_datetime, get_display_timezone
 from bramble.journal_db import JournalDB
+from bramble.journal_entry import JournalEntry, JournalStatus
 from bramble.project_summary import ProjectSummary
 from bramble.token_store import TokenMutation, TokenStore
 
 _PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-_MAX_FORM_BYTES = 8 * 1024
+_MAX_FORM_BYTES = 64 * 1024
 _MAX_SEARCH_CHARS = 200
+_MAX_JOURNAL_TITLE_CHARS = 200
+_MAX_JOURNAL_PHASE_CHARS = 120
+_MAX_JOURNAL_CONTENT_CHARS = 32000
+_MAX_JOURNAL_TAGS_CHARS = 200
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -155,6 +160,12 @@ def create_admin_app(
             name="project_detail",
         ),
         Route(
+            "/projects/{project:str}/entries",
+            project_entry_create,
+            methods=["POST"],
+            name="project_entry_create",
+        ),
+        Route(
             "/projects/{project:str}/status",
             project_status_update,
             methods=["POST"],
@@ -214,7 +225,7 @@ async def login_submit(request: Request) -> Response:
             "login.html",
             {
                 "next_url": _safe_next(request.query_params.get("next")),
-                "error": "Zu viele Login-Versuche. Bitte spaeter erneut versuchen.",
+                "error": "Zu viele Login-Versuche. Bitte später erneut versuchen.",
                 "actor": None,
             },
             status_code=429,
@@ -432,6 +443,112 @@ async def project_detail(request: Request) -> Response:
     if not _PROJECT_RE.fullmatch(project):
         return PlainTextResponse("unknown project", status_code=404)
 
+    assist_mode = _assist_mode(request.query_params.get("assist"))
+    assist_form = _default_assist_form(
+        assist_mode,
+        entry_id=request.query_params.get("entry_id"),
+    )
+    try:
+        created_entry_id = _positive_int_or_none(request.query_params.get("created"))
+    except ValueError:
+        created_entry_id = None
+    return _render_project_detail(
+        request,
+        session,
+        project,
+        assist_mode=assist_mode,
+        assist_form=assist_form,
+        assist_success_id=created_entry_id,
+    )
+
+
+async def project_entry_create(request: Request) -> Response:
+    session = _current_session(request)
+    if session is None:
+        return _login_redirect(request)
+
+    project = request.path_params["project"]
+    if not _PROJECT_RE.fullmatch(project):
+        return PlainTextResponse("unknown project", status_code=404)
+
+    form = await _read_urlencoded_form(request)
+    ctx = _ctx(request)
+    if project not in {summary.name for summary in ctx.read_model.projects()}:
+        return PlainTextResponse("unknown project", status_code=404)
+    if not _csrf_is_valid(session, form):
+        _audit(
+            request,
+            session,
+            action="csrf.denied",
+            target_type="journal_entry",
+            target=project,
+            result="denied",
+        )
+        return PlainTextResponse("forbidden", status_code=403)
+
+    assist_mode = _assist_mode(form.get("assist"))
+    if assist_mode is None:
+        return PlainTextResponse("unknown assist mode", status_code=400)
+
+    assist_form = _assist_form_from_form(form)
+    try:
+        entry = _entry_from_assist_form(
+            project,
+            assist_mode=assist_mode,
+            assist_form=assist_form,
+            actor=session.actor,
+        )
+        created = ctx.db.append(entry)
+    except (TypeError, ValueError) as exc:
+        _audit(
+            request,
+            session,
+            action="journal.append",
+            target_type="journal_entry",
+            target=project,
+            result="denied",
+            details={"reason": str(exc), "status": _assist_status(assist_mode).value},
+        )
+        return _render_project_detail(
+            request,
+            session,
+            project,
+            assist_mode=assist_mode,
+            assist_form=assist_form,
+            assist_error=str(exc),
+            status_code=400,
+        )
+
+    _audit(
+        request,
+        session,
+        action="journal.append",
+        target_type="journal_entry",
+        target=project,
+        result="success",
+        details={
+            "entry_id": created.id,
+            "status": created.status.value,
+            "link_count": len(created.links),
+        },
+    )
+    return RedirectResponse(
+        url=f"/projects/{quote(project)}?created={created.id}#entry-{created.id}",
+        status_code=303,
+    )
+
+
+def _render_project_detail(
+    request: Request,
+    session: AdminSession,
+    project: str,
+    *,
+    assist_mode: str | None = None,
+    assist_form: dict[str, str] | None = None,
+    assist_error: str | None = None,
+    assist_success_id: int | None = None,
+    status_code: int = 200,
+) -> Response:
     ctx = _ctx(request)
     projects = ctx.read_model.projects()
     summaries = {summary.name: summary for summary in projects}
@@ -452,8 +569,6 @@ async def project_detail(request: Request) -> Response:
     project_context = ctx.read_model.project_context(project)
     workflow = ctx.read_model.workflow_guidance()
     project_status = ctx.read_model.project_status(project)
-    assist = request.query_params.get("assist", "").strip().lower()
-    assist_mode = assist if assist in {"bugfix", "notiz"} else None
 
     return _render(
         request,
@@ -471,8 +586,142 @@ async def project_detail(request: Request) -> Response:
             "search_error": search_error,
             "workflow": workflow,
             "assist_mode": assist_mode,
+            "assist_form": assist_form or _default_assist_form(assist_mode),
+            "assist_error": assist_error,
+            "assist_success_id": assist_success_id,
+            "journal_title_max": _MAX_JOURNAL_TITLE_CHARS,
+            "journal_phase_max": _MAX_JOURNAL_PHASE_CHARS,
+            "journal_content_max": _MAX_JOURNAL_CONTENT_CHARS,
+            "journal_tags_max": _MAX_JOURNAL_TAGS_CHARS,
         },
+        status_code=status_code,
     )
+
+
+def _assist_mode(value: str | None) -> str | None:
+    normalised = (value or "").strip().lower()
+    if normalised in {"bugfix", "notiz"}:
+        return normalised
+    return None
+
+
+def _assist_status(assist_mode: str) -> JournalStatus:
+    if assist_mode == "bugfix":
+        return JournalStatus.BUGFIX
+    if assist_mode == "notiz":
+        return JournalStatus.NOTIZ
+    raise ValueError("assist mode is invalid")
+
+
+def _default_assist_form(
+    assist_mode: str | None,
+    *,
+    entry_id: str | None = None,
+) -> dict[str, str]:
+    try:
+        link_entry_id = _positive_int_or_none(entry_id)
+    except ValueError:
+        link_entry_id = None
+    return {
+        "title": "",
+        "phase": "",
+        "content": "",
+        "tags": "bugfix" if assist_mode == "bugfix" else "",
+        "link_entry_id": str(link_entry_id or ""),
+    }
+
+
+def _assist_form_from_form(form: dict[str, str]) -> dict[str, str]:
+    return {
+        "title": form.get("title", ""),
+        "phase": form.get("phase", ""),
+        "content": form.get("content", ""),
+        "tags": form.get("tags", ""),
+        "link_entry_id": form.get("link_entry_id", ""),
+    }
+
+
+def _entry_from_assist_form(
+    project: str,
+    *,
+    assist_mode: str,
+    assist_form: dict[str, str],
+    actor: str,
+) -> JournalEntry:
+    title = _bounded_optional_text(
+        assist_form.get("title"),
+        field_name="Titel",
+        max_chars=_MAX_JOURNAL_TITLE_CHARS,
+    )
+    phase = _bounded_optional_text(
+        assist_form.get("phase"),
+        field_name="Phase",
+        max_chars=_MAX_JOURNAL_PHASE_CHARS,
+    )
+    content = (assist_form.get("content") or "").strip()
+    if not content:
+        raise ValueError("Inhalt darf nicht leer sein.")
+    if len(content) > _MAX_JOURNAL_CONTENT_CHARS:
+        raise ValueError(
+            f"Inhalt darf höchstens {_MAX_JOURNAL_CONTENT_CHARS} Zeichen lang sein."
+        )
+    tags = _parse_tag_input(assist_form.get("tags"))
+    link_id = _positive_int_or_none(assist_form.get("link_entry_id"))
+    links = []
+    if link_id is not None:
+        relation = "corrects" if assist_mode == "bugfix" else "adds_context_to"
+        links.append({"to_entry_id": link_id, "relation": relation})
+
+    return JournalEntry(
+        project=project,
+        status=_assist_status(assist_mode),
+        title=title,
+        phase=phase,
+        content=content,
+        actor=actor,
+        client="admin-ui",
+        source="admin-ui",
+        tags=tags,
+        links=links,
+    )
+
+
+def _bounded_optional_text(
+    value: str | None,
+    *,
+    field_name: str,
+    max_chars: int,
+) -> str | None:
+    stripped = (value or "").strip()
+    if not stripped:
+        return None
+    if len(stripped) > max_chars:
+        raise ValueError(f"{field_name} darf höchstens {max_chars} Zeichen lang sein.")
+    return stripped
+
+
+def _parse_tag_input(value: str | None) -> tuple[str, ...]:
+    stripped = (value or "").strip()
+    if not stripped:
+        return ()
+    if len(stripped) > _MAX_JOURNAL_TAGS_CHARS:
+        raise ValueError(
+            f"Tags dürfen höchstens {_MAX_JOURNAL_TAGS_CHARS} Zeichen lang sein."
+        )
+    return tuple(tag.strip().lower() for tag in stripped.split(",") if tag.strip())
+
+
+def _positive_int_or_none(value: str | None) -> int | None:
+    stripped = (value or "").strip()
+    if not stripped:
+        return None
+    try:
+        parsed = int(stripped)
+    except ValueError as exc:
+        raise ValueError("Eintrags-ID muss eine positive Zahl sein.") from exc
+    if parsed <= 0:
+        raise ValueError("Eintrags-ID muss eine positive Zahl sein.")
+    return parsed
 
 
 async def project_status_update(request: Request) -> Response:
@@ -557,7 +806,7 @@ async def global_search(request: Request) -> Response:
                     limit=80,
                 )
             except ValueError:
-                search_error = "Ungueltiger Filterwert."
+                search_error = "Ungültiger Filterwert."
 
     return _render(
         request,

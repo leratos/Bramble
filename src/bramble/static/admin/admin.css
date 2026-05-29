@@ -38,7 +38,8 @@ a:hover {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -75,6 +76,7 @@ select {
 
 input:focus,
 select:focus,
+textarea:focus,
 button:focus,
 a:focus {
   outline: 3px solid color-mix(in srgb, var(--focus) 35%, transparent);
@@ -401,6 +403,46 @@ textarea {
   color: var(--warn-text);
   margin: 0 0 1rem;
   padding: 0.75rem 0.9rem;
+}
+
+.alert.success {
+  border-color: #a8d3b5;
+  background: #edf8f0;
+  color: #1f5d36;
+}
+
+.assist-form {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.assist-form h3,
+.assist-form p {
+  margin: 0;
+}
+
+.assist-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.75rem;
+}
+
+.entry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: end;
+}
+
+.entry-actions a {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+}
+
+.entry-actions a:hover {
+  background: var(--surface-strong);
+  text-decoration: none;
 }
 
 .login-page {

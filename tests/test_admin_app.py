@@ -305,7 +305,113 @@ class TestAdminApp:
         assert "Projekt-Lifecycle" in response.text
         assert "Lifecycle: active" in response.text
         assert "Korrektur-Assistent" in response.text
-        assert "Bugfix zu diesem Eintrag" in response.text
+        assert "Append-only Journal-Eintrag erstellen." in response.text
+        assert "Bugfix erstellen" in response.text
+        assert "Korrigierte Eintrags-ID" in response.text
+        assert "Bugfix eintragen" in response.text
+
+    def test_project_view_prefills_assist_target_from_entry_action(
+        self, admin_client: TestClient, db: JournalDB
+    ) -> None:
+        entry = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="target entry",
+            )
+        )
+        _login(admin_client)
+
+        response = admin_client.get(f"/projects/bramble?assist=bugfix&entry_id={entry.id}")
+
+        assert response.status_code == 200
+        assert f'value="{entry.id}"' in response.text
+
+    def test_project_assist_creates_append_only_note(
+        self, admin_client: TestClient, db: JournalDB
+    ) -> None:
+        _login(admin_client)
+
+        response = admin_client.post(
+            "/projects/bramble/entries",
+            data={
+                "csrf_token": _csrf(admin_client),
+                "assist": "notiz",
+                "title": "Nachtrag mit Umlaut",
+                "phase": "Phase 4e",
+                "content": "Prüfung abgeschlossen.",
+                "tags": "docs, admin-ui",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        created = db.read("bramble", n=1)[0]
+        assert created.status is JournalStatus.NOTIZ
+        assert created.title == "Nachtrag mit Umlaut"
+        assert created.phase == "Phase 4e"
+        assert created.content == "Prüfung abgeschlossen."
+        assert created.tags == ("admin-ui", "docs")
+        assert created.actor == "admin"
+        assert created.client == "admin-ui"
+        assert created.source == "admin-ui"
+
+        event = admin_client.app.state.admin.audit_log.read_recent()[0]
+        assert event.action == "journal.append"
+        assert event.result == "success"
+        assert event.details["entry_id"] == created.id
+
+    def test_project_assist_creates_linked_bugfix(
+        self, admin_client: TestClient, db: JournalDB
+    ) -> None:
+        old = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content="old work item",
+            )
+        )
+        _login(admin_client)
+
+        response = admin_client.post(
+            "/projects/bramble/entries",
+            data={
+                "csrf_token": _csrf(admin_client),
+                "assist": "bugfix",
+                "title": "Bugfix Admin-UI",
+                "content": "Korrektur eingetragen.",
+                "tags": "bugfix",
+                "link_entry_id": str(old.id),
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        created = db.read("bramble", n=1)[0]
+        assert created.status is JournalStatus.BUGFIX
+        assert created.links[0].entry_id == old.id
+        assert created.links[0].relation.value == "corrects"
+
+    def test_project_assist_rejects_empty_content(
+        self, admin_client: TestClient, db: JournalDB
+    ) -> None:
+        _login(admin_client)
+        before = len(db.read("bramble", n=20))
+
+        response = admin_client.post(
+            "/projects/bramble/entries",
+            data={
+                "csrf_token": _csrf(admin_client),
+                "assist": "notiz",
+                "title": "Unvollständig",
+                "content": "   ",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "Inhalt darf nicht leer sein." in response.text
+        assert "Unvollständig" in response.text
+        assert len(db.read("bramble", n=20)) == before
 
     def test_project_status_update_changes_registry_status(
         self, admin_client: TestClient
@@ -414,7 +520,7 @@ class TestAdminApp:
         response = admin_client.get("/search?q=anything&status=bad&since=7d")
 
         assert response.status_code == 200
-        assert "Ungueltiger Filterwert." in response.text
+        assert "Ungültiger Filterwert." in response.text
 
     def test_global_search_supports_project_and_tag_filters(
         self, admin_client: TestClient, db: JournalDB
@@ -471,7 +577,7 @@ class TestAdminApp:
         assert "Offene Punkte" in response.text
         assert "project context open task" in response.text
         assert "Letzte Bugfixes" in response.text
-        assert "Workflow fuer Eintragsabschluss" in response.text
+        assert "Workflow für Eintragsabschluss" in response.text
         assert "Append-only Journal-Eintrag geschrieben" in response.text
 
     def test_project_open_metric_uses_total_not_preview_limit(
@@ -602,8 +708,8 @@ class TestAdminApp:
         assert dashboard.status_code == 200
         assert "berry-gym" in dashboard.text
         assert detail.status_code == 200
-        assert "0 Eintraege" in detail.text
-        assert "Noch keine Journal-Eintraege." in detail.text
+        assert "0 Einträge" in detail.text
+        assert "Noch keine Journal-Einträge." in detail.text
 
     def test_token_create_requires_csrf(self, admin_client: TestClient) -> None:
         _login(admin_client)
@@ -637,7 +743,7 @@ class TestAdminApp:
         assert event.target == "berry-gym"
         assert event.result == "success"
         assert "generated-token" not in str(event.details)
-        assert "0 Eintraege" in response.text
+        assert "0 Einträge" in response.text
 
     def test_token_rotate_replaces_only_target(
         self, admin_client: TestClient

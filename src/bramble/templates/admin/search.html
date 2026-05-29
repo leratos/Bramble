@@ -7,7 +7,7 @@
     <div>
       <p class="eyebrow">Suche</p>
       <h1 id="search-title">Globale Suche</h1>
-      <p>Projektuebergreifende Volltextsuche mit Status- und Zeitraum-Filter.</p>
+      <p>Projektübergreifende Volltextsuche mit Status- und Zeitraum-Filter.</p>
     </div>
   </section>
 
@@ -45,7 +45,7 @@
 
     <button type="submit">Suchen</button>
     {% if query %}
-      <a href="{{ url_for('global_search') }}">Zuruecksetzen</a>
+      <a href="{{ url_for('global_search') }}">Zurücksetzen</a>
     {% endif %}
   </form>
 
@@ -87,7 +87,7 @@
         </article>
       {% else %}
         {% if query %}
-          <p class="empty-state">Keine passenden Eintraege.</p>
+          <p class="empty-state">Keine passenden Einträge.</p>
         {% else %}
           <p class="empty-state">Starte eine Suche mit Query und optionalen Filtern.</p>
         {% endif %}

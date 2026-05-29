@@ -16,7 +16,7 @@
       <strong>{{ stats.project_count }}</strong>
     </article>
     <article class="metric">
-      <span>Eintraege</span>
+      <span>Einträge</span>
       <strong>{{ stats.total_entries }}</strong>
     </article>
     <article class="metric">
@@ -86,15 +86,15 @@
 
   <section class="action-panel" aria-labelledby="workflow-title">
     <h2 id="workflow-title">Phase-4e Workflow-Hinweise</h2>
-    <p>Die Journal-Eintragserstellung bleibt append-only ueber MCP-Clients. Diese UI zeigt nur Lese-/Betriebskontext.</p>
+    <p>Journal-Einträge bleiben append-only. Erstellung ist über MCP-Clients und den Korrektur-Assistenten möglich.</p>
     <p><strong>Status-Empfehlung:</strong></p>
     <div class="chip-list" aria-label="Status-Empfehlung">
       {% for status in workflow.statuses %}
         <span>{{ status }}</span>
       {% endfor %}
     </div>
-    <p><strong>Tag-Vorschlaege:</strong></p>
-    <div class="chip-list" aria-label="Tag-Vorschlaege">
+    <p><strong>Tag-Vorschläge:</strong></p>
+    <div class="chip-list" aria-label="Tag-Vorschläge">
       {% for tag in workflow.suggested_tags %}
         <span>{{ tag }}</span>
       {% endfor %}
@@ -108,7 +108,7 @@
   </section>
 
   <section class="entry-section" aria-labelledby="recent-title">
-    <h2 id="recent-title">Letzte Eintraege</h2>
+    <h2 id="recent-title">Letzte Einträge</h2>
     <div class="entry-list">
       {% for entry in stats.recent_entries %}
         <article class="entry">
@@ -162,7 +162,7 @@
           <p class="entry-content">{{ entry.content|admin_text }}</p>
         </article>
       {% else %}
-        <p class="empty-state">Noch keine Journal-Eintraege.</p>
+        <p class="empty-state">Noch keine Journal-Einträge.</p>
       {% endfor %}
     </div>
   </section>

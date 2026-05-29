@@ -8,7 +8,7 @@
       <p class="eyebrow">Projekt</p>
       <h1 id="project-title">{{ summary.name }}</h1>
       <p>
-        {{ summary.entry_count }} Eintraege -
+        {{ summary.entry_count }} Einträge -
         {% if summary.last_timestamp %}
           letzter Eintrag
           <time
@@ -18,7 +18,7 @@
             {{ summary.last_timestamp|admin_datetime }}
           </time>
         {% else %}
-          noch keine Eintraege
+          noch keine Einträge
         {% endif %}
       </p>
       {% if project_status %}
@@ -29,7 +29,7 @@
 
   <section class="action-panel" aria-labelledby="project-status-title">
     <h2 id="project-status-title">Projekt-Lifecycle</h2>
-    <p>Status des Projekts umschalten. Dies betrifft nur die Registry, nicht die Journal-Eintraege.</p>
+    <p>Status des Projekts umschalten. Dies betrifft nur die Registry, nicht die Journal-Einträge.</p>
     <div class="chip-list" aria-label="Aktueller Status">
       <span>{{ project_status or 'unbekannt' }}</span>
     </div>
@@ -53,7 +53,7 @@
     <input id="q" name="q" value="{{ query }}" maxlength="200" placeholder="FTS5-Suche">
     <button type="submit">Suchen</button>
     {% if query %}
-      <a href="{{ url_for('project_detail', project=summary.name) }}">Zuruecksetzen</a>
+      <a href="{{ url_for('project_detail', project=summary.name) }}">Zurücksetzen</a>
     {% endif %}
   </form>
 
@@ -100,14 +100,14 @@
   </section>
 
   <section class="action-panel" aria-labelledby="project-workflow-title">
-    <h2 id="project-workflow-title">Workflow fuer Eintragsabschluss</h2>
-    <p>Empfohlene Statuswerte und DoD fuer dieses Projekt.</p>
+    <h2 id="project-workflow-title">Workflow für Eintragsabschluss</h2>
+    <p>Empfohlene Statuswerte und DoD für dieses Projekt.</p>
     <div class="chip-list" aria-label="Status-Empfehlung">
       {% for status in workflow.statuses %}
         <span>{{ status }}</span>
       {% endfor %}
     </div>
-    <div class="chip-list" aria-label="Tag-Vorschlaege">
+    <div class="chip-list" aria-label="Tag-Vorschläge">
       {% for tag in workflow.suggested_tags %}
         <span>{{ tag }}</span>
       {% endfor %}
@@ -121,25 +121,121 @@
 
   <section class="action-panel" aria-labelledby="correction-assist-title">
     <h2 id="correction-assist-title">Korrektur-Assistent</h2>
-    <p>Hilfen fuer die naechste append-only Journal-Aktion.</p>
+    <p>Append-only Journal-Eintrag erstellen.</p>
     <div class="chip-list">
       <a href="{{ url_for('project_detail', project=summary.name) }}?assist=notiz">Nachtrag erstellen</a>
-      <a href="{{ url_for('project_detail', project=summary.name) }}?assist=bugfix">Bugfix zu diesem Eintrag</a>
+      <a href="{{ url_for('project_detail', project=summary.name) }}?assist=bugfix">Bugfix erstellen</a>
     </div>
+    {% if assist_success_id %}
+      <p class="alert success" role="status">Journal-Eintrag #{{ assist_success_id }} wurde erstellt.</p>
+    {% endif %}
+    {% if assist_error %}
+      <p class="alert" role="alert">{{ assist_error }}</p>
+    {% endif %}
     {% if assist_mode == 'notiz' %}
-      <div class="notice">
+      <form
+        class="assist-form"
+        method="post"
+        action="{{ url_for('project_entry_create', project=summary.name) }}"
+      >
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="assist" value="notiz">
         <h3>Nachtrag erstellen</h3>
         <p>Status: <strong>notiz</strong></p>
-        <p>Empfohlene Inhalte: Entscheidung, Betriebsereignis oder Kontext.</p>
-        <p>Empfohlene Tags: decision, deployment, security, backup, token.</p>
-      </div>
+        <div class="assist-grid">
+          <label>
+            Titel
+            <input name="title" value="{{ assist_form.title }}" maxlength="{{ journal_title_max }}">
+          </label>
+          <label>
+            Phase
+            <input name="phase" value="{{ assist_form.phase }}" maxlength="{{ journal_phase_max }}">
+          </label>
+        </div>
+        <label>
+          Inhalt
+          <textarea
+            name="content"
+            rows="8"
+            required
+            maxlength="{{ journal_content_max }}"
+          >{{ assist_form.content }}</textarea>
+        </label>
+        <div class="assist-grid">
+          <label>
+            Tags
+            <input
+              name="tags"
+              value="{{ assist_form.tags }}"
+              maxlength="{{ journal_tags_max }}"
+              placeholder="decision, deployment, backup"
+            >
+          </label>
+          <label>
+            Bezugs-Eintrags-ID
+            <input
+              name="link_entry_id"
+              type="number"
+              min="1"
+              value="{{ assist_form.link_entry_id }}"
+            >
+          </label>
+        </div>
+        <p class="entry-status">Relation bei ID: adds_context_to</p>
+        <button type="submit">Journal-Eintrag erstellen</button>
+      </form>
     {% elif assist_mode == 'bugfix' %}
-      <div class="notice">
-        <h3>Bugfix zu diesem Eintrag</h3>
+      <form
+        class="assist-form"
+        method="post"
+        action="{{ url_for('project_entry_create', project=summary.name) }}"
+      >
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="assist" value="bugfix">
+        <h3>Bugfix erstellen</h3>
         <p>Status: <strong>bugfix</strong></p>
-        <p>Empfohlene Inhalte: Korrektur, Referenz auf alten Eintrag, Auswirkung.</p>
-        <p>Link-Relation: <strong>corrects</strong></p>
-      </div>
+        <div class="assist-grid">
+          <label>
+            Titel
+            <input name="title" value="{{ assist_form.title }}" maxlength="{{ journal_title_max }}">
+          </label>
+          <label>
+            Phase
+            <input name="phase" value="{{ assist_form.phase }}" maxlength="{{ journal_phase_max }}">
+          </label>
+        </div>
+        <label>
+          Inhalt
+          <textarea
+            name="content"
+            rows="8"
+            required
+            maxlength="{{ journal_content_max }}"
+          >{{ assist_form.content }}</textarea>
+        </label>
+        <div class="assist-grid">
+          <label>
+            Tags
+            <input
+              name="tags"
+              value="{{ assist_form.tags }}"
+              maxlength="{{ journal_tags_max }}"
+              placeholder="bugfix, admin-ui"
+            >
+          </label>
+          <label>
+            Korrigierte Eintrags-ID
+            <input
+              name="link_entry_id"
+              type="number"
+              min="1"
+              value="{{ assist_form.link_entry_id }}"
+            >
+          </label>
+        </div>
+        <p class="entry-status">Relation bei ID: corrects</p>
+        <button type="submit">Bugfix eintragen</button>
+      </form>
     {% endif %}
   </section>
 
@@ -191,6 +287,12 @@
                 </div>
               {% endif %}
             </div>
+            {% if entry.id %}
+              <nav class="entry-actions" aria-label="Korrekturaktionen">
+                <a href="{{ url_for('project_detail', project=summary.name) }}?assist=notiz&entry_id={{ entry.id }}#correction-assist-title">Nachtrag</a>
+                <a href="{{ url_for('project_detail', project=summary.name) }}?assist=bugfix&entry_id={{ entry.id }}#correction-assist-title">Bugfix</a>
+              </nav>
+            {% endif %}
           </header>
           <p class="entry-meta">
             <time datetime="{{ entry.timestamp_iso() }}" title="{{ entry.timestamp_iso() }}">
@@ -207,9 +309,9 @@
         </article>
       {% else %}
         {% if query %}
-          <p class="empty-state">Keine passenden Eintraege.</p>
+          <p class="empty-state">Keine passenden Einträge.</p>
         {% else %}
-          <p class="empty-state">Noch keine Journal-Eintraege.</p>
+          <p class="empty-state">Noch keine Journal-Einträge.</p>
         {% endif %}
       {% endfor %}
     </div>
