@@ -838,6 +838,61 @@ class TestOpenItems:
 
         assert [entry.id for entry in result] == [open_entry.id]
 
+    def test_open_items_excludes_entries_closed_by_newer_same_title_entry(
+        self,
+        db: JournalDB,
+    ) -> None:
+        open_entry = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                title="Konzept-Phase Note-Nextcloud-Replace",
+                content="start",
+                timestamp=datetime(2026, 5, 13, 12, 0, tzinfo=UTC),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.ABGESCHLOSSEN,
+                title="Konzept-Phase Note-Nextcloud-Replace",
+                content="abgeschlossen",
+                timestamp=datetime(2026, 5, 13, 12, 0, tzinfo=UTC),
+            )
+        )
+
+        result = db.open_items(project="elder-berry", limit=10)
+
+        assert result == []
+        assert open_entry.id is not None
+
+    def test_open_items_keeps_entries_open_for_different_title(
+        self,
+        db: JournalDB,
+    ) -> None:
+        open_entry = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                title="Konzept-Phase Note-Nextcloud-Replace",
+                content="start",
+                timestamp=datetime(2026, 5, 13, 12, 0, tzinfo=UTC),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.ABGESCHLOSSEN,
+                title="Andere Abschluss-Phase",
+                content="abgeschlossen",
+                timestamp=datetime(2026, 5, 13, 12, 0, tzinfo=UTC),
+            )
+        )
+
+        result = db.open_items(project="elder-berry", limit=10)
+
+        assert [entry.id for entry in result] == [open_entry.id]
+
 
 # ---------------------------------------------------------------------------
 # context()
