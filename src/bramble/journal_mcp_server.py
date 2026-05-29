@@ -33,6 +33,7 @@ from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 
 from bramble.auth_validator import AuthValidator
 from bramble.journal_db import JournalDB
+from bramble.journal_context import JournalContext
 from bramble.journal_digest import JournalDigest
 from bramble.journal_entry import JournalEntry, JournalStatus
 from bramble.mcp_errors import translate_errors
@@ -53,21 +54,6 @@ _token_project: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 # Nginx terminates TLS on the same host and proxies to loopback, so a
 # loopback peer is our own proxy. Any other peer could forge the header.
 _TRUSTED_PROXY_HOSTS: frozenset[str] = frozenset({"127.0.0.1", "::1"})
-_CONTEXT_N_RECENT_MAX = 100
-_CONTEXT_SUGGESTION_TERMS: tuple[str, ...] = (
-    "deployment",
-    "backup",
-    "restore",
-    "bugfix",
-    "decision",
-    "admin",
-    "token",
-    "mcp",
-    "import",
-    "matrix",
-    "ssh",
-    "host",
-)
 
 
 # ---------------------------------------------------------------------------
@@ -145,62 +131,20 @@ def _digest_to_dict(digest: JournalDigest) -> dict[str, Any]:
     }
 
 
-def _validate_context_n_recent(value: object) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError("n_recent must be an int")
-    if value <= 0:
-        raise ValueError("n_recent must be positive")
-    if value > _CONTEXT_N_RECENT_MAX:
-        raise ValueError(f"n_recent must be at most {_CONTEXT_N_RECENT_MAX}")
-    return value
-
-
-def _context_suggested_searches(
-    *,
-    recent: list[JournalEntry],
-    digest: JournalDigest,
-) -> list[str]:
-    suggestions: list[str] = []
-    seen: set[str] = set()
-
-    for entry in recent:
-        if entry.phase and entry.phase not in seen:
-            suggestions.append(entry.phase)
-            seen.add(entry.phase)
-
-    lowered_text = "\n".join(
-        (
-            f"{entry.title or ''}\n{entry.content}\n{' '.join(entry.tags)}"
-            for entry in digest.entries
-        )
-    ).lower()
-    for term in _CONTEXT_SUGGESTION_TERMS:
-        if term == "bugfix":
-            has_term = bool(digest.bugfixes)
-        elif term == "decision":
-            has_term = bool(digest.decisions)
-        else:
-            has_term = term in lowered_text
-        if has_term and term not in seen:
-            suggestions.append(term)
-            seen.add(term)
-    return suggestions[:8]
-
-
-def _context_related_projects(
-    *,
-    db: JournalDB,
-    project: str,
-    suggested_searches: list[str],
-) -> list[str]:
-    counts: dict[str, int] = {}
-    for query in suggested_searches:
-        for hit in db.search_all(query, limit=20):
-            if hit.project == project:
-                continue
-            counts[hit.project] = counts.get(hit.project, 0) + 1
-    ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
-    return [name for name, _ in ranked[:5]]
+def _context_to_dict(context: JournalContext) -> dict[str, Any]:
+    return {
+        "project": context.project,
+        "recent": [_entry_to_dict(entry) for entry in context.recent],
+        "open_items": [_entry_to_dict(entry) for entry in context.open_items],
+        "recent_bugfixes": [
+            _entry_to_dict(entry) for entry in context.recent_bugfixes
+        ],
+        "recent_decisions": [
+            _entry_to_dict(entry) for entry in context.recent_decisions
+        ],
+        "related_projects": list(context.related_projects),
+        "suggested_searches": list(context.suggested_searches),
+    }
 
 
 def _mcp_source(source: str | None) -> str:
@@ -576,45 +520,13 @@ class JournalMCPServer:
             """
 
             _require_kebab_case(project)
-            n_recent = _validate_context_n_recent(n_recent)
-            recent = await asyncio.to_thread(db.read, project, n_recent)
-            digest = await asyncio.to_thread(
-                db.digest,
+            context = await asyncio.to_thread(
+                db.context,
                 project=project,
-                since="30d",
-                limit=100,
+                n_recent=n_recent,
+                include_cross_project=include_cross_project,
             )
-            suggested_searches = _context_suggested_searches(
-                recent=recent,
-                digest=digest,
-            )
-            related_projects: list[str] = []
-            if include_cross_project and suggested_searches:
-                related_projects = await asyncio.to_thread(
-                    _context_related_projects,
-                    db=db,
-                    project=project,
-                    suggested_searches=suggested_searches,
-                )
-
-            return {
-                "project": project,
-                "recent": [_entry_to_dict(entry) for entry in recent],
-                "open_items": [
-                    _entry_to_dict(entry)
-                    for entry in digest.open_items[:n_recent]
-                ],
-                "recent_bugfixes": [
-                    _entry_to_dict(entry)
-                    for entry in digest.bugfixes[:n_recent]
-                ],
-                "recent_decisions": [
-                    _entry_to_dict(entry)
-                    for entry in digest.decisions[:n_recent]
-                ],
-                "related_projects": related_projects,
-                "suggested_searches": suggested_searches,
-            }
+            return _context_to_dict(context)
 
         @app.tool
         @translate_errors

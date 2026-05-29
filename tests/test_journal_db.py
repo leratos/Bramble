@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from bramble.journal_db import JournalDB
+from bramble.journal_context import JournalContext
 from bramble.journal_digest import JournalDigest
 from bramble.journal_entry import JournalEntry, JournalEntryLink, JournalStatus
 from bramble.project_summary import ProjectSummary
@@ -549,6 +550,117 @@ class TestDigest:
     def test_digest_caps_limit(self, db: JournalDB) -> None:
         with pytest.raises(ValueError, match="at most 100"):
             db.digest(limit=101)
+
+
+# ---------------------------------------------------------------------------
+# context()
+# ---------------------------------------------------------------------------
+class TestContext:
+    def test_context_returns_curated_structure(self, db: JournalDB) -> None:
+        now = datetime(2026, 5, 29, 12, 0, tzinfo=UTC)
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content="deployment prep in progress",
+                title="Phase 4d prep",
+                phase="Phase 4d",
+                tags=["deploy"],
+                timestamp=now - timedelta(hours=1),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.BUGFIX,
+                content="fixed digest edge case",
+                timestamp=now - timedelta(hours=2),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                title="Decision: keep context deterministic",
+                content="decision payload",
+                tags=["decision"],
+                timestamp=now - timedelta(hours=3),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.NOTIZ,
+                content="deployment notes from sibling project",
+                timestamp=now - timedelta(hours=4),
+            )
+        )
+
+        context = db.context("bramble", n_recent=2)
+
+        assert isinstance(context, JournalContext)
+        assert context.project == "bramble"
+        assert len(context.recent) == 2
+        assert [entry.status.value for entry in context.open_items] == ["in_arbeit"]
+        assert [entry.status.value for entry in context.recent_bugfixes] == ["bugfix"]
+        assert [entry.title for entry in context.recent_decisions] == [
+            "Decision: keep context deterministic"
+        ]
+        assert "elder-berry" in context.related_projects
+        assert "Phase 4d" in context.suggested_searches
+        assert "deployment" in context.suggested_searches
+
+    def test_context_empty_project_returns_empty_lists(self, db: JournalDB) -> None:
+        context = db.context("berry-gym")
+
+        assert context == JournalContext(
+            project="berry-gym",
+            recent=(),
+            open_items=(),
+            recent_bugfixes=(),
+            recent_decisions=(),
+            related_projects=(),
+            suggested_searches=(),
+        )
+
+    def test_context_can_disable_cross_project_lookup(self, db: JournalDB) -> None:
+        now = datetime(2026, 5, 29, 12, 0, tzinfo=UTC)
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="deployment prep",
+                phase="Phase 4d",
+                timestamp=now,
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.NOTIZ,
+                content="deployment in other project",
+                timestamp=now - timedelta(minutes=1),
+            )
+        )
+
+        context = db.context("bramble", include_cross_project=False)
+
+        assert context.related_projects == ()
+        assert context.suggested_searches == ("Phase 4d", "deployment")
+
+    def test_context_rejects_non_positive_n_recent(self, db: JournalDB) -> None:
+        with pytest.raises(ValueError, match="positive"):
+            db.context("bramble", n_recent=0)
+
+    def test_context_rejects_n_recent_above_cap(self, db: JournalDB) -> None:
+        with pytest.raises(ValueError, match="at most 100"):
+            db.context("bramble", n_recent=101)
+
+    def test_context_rejects_non_bool_include_cross_project(
+        self, db: JournalDB
+    ) -> None:
+        with pytest.raises(TypeError, match="include_cross_project"):
+            db.context("bramble", include_cross_project=1)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------

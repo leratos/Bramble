@@ -33,6 +33,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from bramble.auth_validator import AuthValidator
+from bramble.journal_context import JournalContext
 from bramble.journal_db import JournalDB
 from bramble.journal_digest import JournalDigest
 from bramble.journal_entry import JournalEntry, JournalStatus
@@ -47,6 +48,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AuthValidator",
+    "JournalContext",
     "JournalDB",
     "JournalDigest",
     "JournalEntry",

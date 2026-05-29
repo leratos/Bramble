@@ -32,6 +32,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from bramble.journal_context import JournalContext
 from bramble.journal_entry import JournalEntry, JournalEntryLink, JournalStatus
 from bramble.journal_digest import JournalDigest
 from bramble.project_summary import ProjectSummary
@@ -41,6 +42,10 @@ logger = logging.getLogger(__name__)
 _PROJECT_STATUSES = {"active", "paused", "archived"}
 _SEARCH_ALL_LIMIT_MAX = 100
 _DIGEST_LIMIT_MAX = 100
+_CONTEXT_N_RECENT_MAX = 100
+_CONTEXT_RELATED_PROJECTS_MAX = 5
+_CONTEXT_RELATED_SEARCH_LIMIT = 20
+_CONTEXT_SUGGESTIONS_MAX = 8
 _DIGEST_RELATIVE_RANGES = {
     "24h": timedelta(hours=24),
     "7d": timedelta(days=7),
@@ -48,6 +53,20 @@ _DIGEST_RELATIVE_RANGES = {
 }
 _DECISION_RE = re.compile(r"\b(decision|entscheidung|festgelegt)\b", re.IGNORECASE)
 _TAG_FILTER_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+_CONTEXT_SUGGESTION_TERMS: tuple[str, ...] = (
+    "deployment",
+    "backup",
+    "restore",
+    "bugfix",
+    "decision",
+    "admin",
+    "token",
+    "mcp",
+    "import",
+    "matrix",
+    "ssh",
+    "host",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -595,6 +614,45 @@ class JournalDB:
             )
         return summaries
 
+    def context(
+        self,
+        project: str,
+        *,
+        n_recent: int = 10,
+        include_cross_project: bool = True,
+    ) -> JournalContext:
+        """Return curated session-start context for ``project``."""
+
+        self._validate_project_arg(project)
+        project = project.strip()
+        self._validate_context_n_recent_arg(n_recent)
+        if not isinstance(include_cross_project, bool):
+            raise TypeError("include_cross_project must be a bool")
+
+        recent = tuple(self.read(project, n_recent))
+        digest = self.digest(project=project, since="30d", limit=100)
+        suggested_searches = _context_suggested_searches(
+            recent=recent,
+            digest=digest,
+        )
+        related_projects: tuple[str, ...] = ()
+        if include_cross_project and suggested_searches:
+            related_projects = _context_related_projects(
+                db=self,
+                project=project,
+                suggested_searches=suggested_searches,
+            )
+
+        return JournalContext(
+            project=project,
+            recent=recent,
+            open_items=tuple(digest.open_items[:n_recent]),
+            recent_bugfixes=tuple(digest.bugfixes[:n_recent]),
+            recent_decisions=tuple(digest.decisions[:n_recent]),
+            related_projects=related_projects,
+            suggested_searches=suggested_searches,
+        )
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
@@ -682,6 +740,12 @@ class JournalDB:
         JournalDB._validate_limit_arg(value, name="limit")
         if value > _DIGEST_LIMIT_MAX:
             raise ValueError(f"limit must be at most {_DIGEST_LIMIT_MAX}")
+
+    @staticmethod
+    def _validate_context_n_recent_arg(value: object) -> None:
+        JournalDB._validate_limit_arg(value, name="n_recent")
+        if value > _CONTEXT_N_RECENT_MAX:
+            raise ValueError(f"n_recent must be at most {_CONTEXT_N_RECENT_MAX}")
 
 
 def _migrate_projects_from_entries(conn: sqlite3.Connection) -> None:
@@ -1033,4 +1097,54 @@ def _entry_is_decision(entry: JournalEntry) -> bool:
     return bool(
         _DECISION_RE.search(entry.title or "")
         or _DECISION_RE.search(entry.content)
+    )
+
+
+def _context_suggested_searches(
+    *,
+    recent: tuple[JournalEntry, ...],
+    digest: JournalDigest,
+) -> tuple[str, ...]:
+    suggestions: list[str] = []
+    seen: set[str] = set()
+
+    for entry in recent:
+        if entry.phase and entry.phase not in seen:
+            suggestions.append(entry.phase)
+            seen.add(entry.phase)
+
+    lowered_text = "\n".join(
+        (
+            f"{entry.title or ''}\n{entry.content}\n{' '.join(entry.tags)}"
+            for entry in digest.entries
+        )
+    ).lower()
+    for term in _CONTEXT_SUGGESTION_TERMS:
+        if term == "bugfix":
+            has_term = bool(digest.bugfixes)
+        elif term == "decision":
+            has_term = bool(digest.decisions)
+        else:
+            has_term = term in lowered_text
+        if has_term and term not in seen:
+            suggestions.append(term)
+            seen.add(term)
+    return tuple(suggestions[:_CONTEXT_SUGGESTIONS_MAX])
+
+
+def _context_related_projects(
+    *,
+    db: JournalDB,
+    project: str,
+    suggested_searches: tuple[str, ...],
+) -> tuple[str, ...]:
+    counts: dict[str, int] = {}
+    for query in suggested_searches:
+        for hit in db.search_all(query, limit=_CONTEXT_RELATED_SEARCH_LIMIT):
+            if hit.project == project:
+                continue
+            counts[hit.project] = counts.get(hit.project, 0) + 1
+    ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    return tuple(
+        name for name, _ in ranked[:_CONTEXT_RELATED_PROJECTS_MAX]
     )
