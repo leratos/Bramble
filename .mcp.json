@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "bramble": {
+      "type": "http",
+      "url": "https://journal.last-strawberry.com/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${BRAMBLE_TOKEN}"
+      }
+    }
+  }
+}
