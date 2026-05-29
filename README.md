@@ -72,7 +72,7 @@ Acht Tools auf dem `JournalMCPServer`, jedes mit `ToolError`-konformer
 Fehlerübersetzung:
 
 | Tool | Zweck |
-|---|---|
+| --- | --- |
 | `journal_read(project, n=80)` | Neueste `n` Einträge für ein Projekt, neueste zuerst |
 | `journal_append(project, status, content, phase=None, title=None)` | Neuen Eintrag schreiben; Timestamp wird serverseitig gesetzt |
 | `journal_search(project, query, limit=20)` | FTS5-Volltextsuche, MATCH-Syntax durchgereicht |
@@ -134,7 +134,7 @@ projektübergreifend.
 Priorität: CLI-Argument > Umgebungsvariable > Default.
 
 | CLI | Env | Default |
-|---|---|---|
+| --- | --- | --- |
 | `--db PATH` | `BRAMBLE_DB_PATH` | `./data/bramble.db` |
 | `--transport stdio\|http` | `BRAMBLE_TRANSPORT` | `stdio` |
 | `--host HOST` | `BRAMBLE_HOST` | `127.0.0.1` |
@@ -263,7 +263,7 @@ Fuer dieses Repo stehen die operativen Agentenregeln zusaetzlich in
 
 ## Repo-Struktur
 
-```
+```text
 Bramble/
 ├── docs/
 │   ├── concepts/        # Phasen-Konzepte

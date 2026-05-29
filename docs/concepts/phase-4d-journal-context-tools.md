@@ -36,7 +36,7 @@ Das reicht fuer den Betrieb. Fuer hohe Alltagstauglichkeit fehlen aber:
 
 ## 3. Tool: `journal_search_all`
 
-### Empfehlung
+### Empfehlung: Search All
 
 Ein neues MCP-Tool fuer projektuebergreifende Suche einfuehren:
 
@@ -71,7 +71,7 @@ Das Tool darf keine Schreibwirkung haben.
 
 ## 4. Tool: `journal_context`
 
-### Empfehlung
+### Empfehlung: Session-Start-Kontext
 
 Ein MCP-Tool fuer den Start einer Arbeitssitzung:
 
@@ -138,7 +138,7 @@ haelt Bramble klein, auditierbar und offline-faehig.
 
 ## 5. Tool: `journal_digest`
 
-### Empfehlung
+### Empfehlung: Zeitraum-Digest
 
 Ein Digest-Tool fuer Zeitraeume:
 

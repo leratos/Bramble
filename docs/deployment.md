@@ -40,7 +40,7 @@ useradd --system --home-dir /opt/bramble --shell /usr/sbin/nologin bramble
 Verzeichnis-Layout unter `/opt/bramble`:
 
 | Pfad | Inhalt |
-|---|---|
+| --- | --- |
 | `/opt/bramble/` | Repository (Code, `scripts/`, `deploy/`) |
 | `/opt/bramble/.venv/` | virtuelle Python-Umgebung |
 | `/opt/bramble/data/` | SQLite-DB `bramble.db` (+ WAL-Sidecars) |
@@ -415,7 +415,7 @@ BRAMBLE_TOKENS="/opt/bramble/secrets/tokens.json"
 BRAMBLE_ADMIN_SECRET="/opt/bramble/secrets/admin-ui.json"
 ```
 
-2. Nach dem Synapse-PostgreSQL-Dump und vor
+1. Nach dem Synapse-PostgreSQL-Dump und vor
    `log "DB-Dumps abgeschlossen:"` ergänzen:
 
 ```sh
@@ -424,7 +424,7 @@ BRAMBLE_SNAPSHOT=$(/opt/bramble/deploy/bramble-backup-snapshot.sh)
 log "Bramble Snapshot: ${BRAMBLE_SNAPSHOT}"
 ```
 
-3. Im `borg create`-Pfadblock ergänzen:
+1. Im `borg create`-Pfadblock ergänzen:
 
 ```sh
     "$BRAMBLE_SNAPSHOT"                                \

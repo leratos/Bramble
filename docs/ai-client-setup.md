@@ -56,7 +56,7 @@ kopiert.
 Der Client sollte nach erfolgreicher Verbindung diese Tools sehen:
 
 | Tool | Nutzung |
-|---|---|
+| --- | --- |
 | `journal_read(project, n=80)` | Letzte Einträge eines Projekts lesen |
 | `journal_append(project, status, content, phase=None, title=None)` | Neuen Eintrag schreiben |
 | `journal_search(project, query, limit=20)` | Volltextsuche in einem Projekt |
@@ -108,7 +108,7 @@ Am Ende einer substanziellen Arbeit:
 ## Status-Werte
 
 | Status | Bedeutung |
-|---|---|
+| --- | --- |
 | `in_arbeit` | Arbeit begonnen, noch offen |
 | `abgeschlossen` | Arbeitspaket abgeschlossen |
 | `notiz` | Betriebsnotiz, Entscheidung, Kontext |

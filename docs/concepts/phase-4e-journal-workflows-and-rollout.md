@@ -31,7 +31,7 @@ Alltag helfen:
 
 ## 3. Projekt-Lifecycle
 
-### Empfehlung
+### Empfehlung: Projekt-Lifecycle
 
 Ein Projekt bekommt einen sichtbaren Lifecycle:
 
@@ -94,7 +94,7 @@ Nicht einfuehren:
 
 ## 5. Tagging-Regeln
 
-### Empfehlung
+### Empfehlung: Tagging-Regeln
 
 Mit einem kleinen kontrollierten Tag-Vokabular starten.
 
@@ -147,7 +147,7 @@ relation: corrects #123
 
 ## 6. Korrektur-Workflow
 
-### Empfehlung
+### Empfehlung: Agenten-Startworkflow
 
 Die Admin-UI fuehrt Nutzer ueber konkrete Aktionen:
 
