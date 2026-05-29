@@ -160,6 +160,7 @@ class TestToolRegistry:
         names = sorted(t.name for t in tools)
         assert names == [
             "journal_append",
+            "journal_context",
             "journal_digest",
             "journal_list_projects",
             "journal_read",
@@ -760,6 +761,137 @@ class TestJournalDigest:
                 await client.call_tool(
                     "journal_digest",
                     {"since": "yesterday"},
+                )
+
+
+# ---------------------------------------------------------------------------
+# journal_context
+# ---------------------------------------------------------------------------
+class TestJournalContext:
+    async def test_happy_path_returns_curated_session_start_structure(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        now = datetime.now(tz=UTC)
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content="deployment prep in progress",
+                title="Phase 4d prep",
+                phase="Phase 4d",
+                tags=["deploy"],
+                timestamp=now - timedelta(hours=1),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.BUGFIX,
+                content="fixed digest edge case",
+                timestamp=now - timedelta(hours=2),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                title="Decision: keep context deterministic",
+                content="decision payload",
+                tags=["decision"],
+                timestamp=now - timedelta(hours=3),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.NOTIZ,
+                content="deployment notes from sibling project",
+                timestamp=now - timedelta(hours=4),
+            )
+        )
+
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_context",
+                {"project": "bramble", "n_recent": 2},
+            )
+
+        assert result.data["project"] == "bramble"
+        assert len(result.data["recent"]) == 2
+        assert [row["status"] for row in result.data["open_items"]] == ["in_arbeit"]
+        assert [row["status"] for row in result.data["recent_bugfixes"]] == ["bugfix"]
+        assert [row["title"] for row in result.data["recent_decisions"]] == [
+            "Decision: keep context deterministic"
+        ]
+        assert "elder-berry" in result.data["related_projects"]
+        assert "Phase 4d" in result.data["suggested_searches"]
+        assert "deployment" in result.data["suggested_searches"]
+
+    async def test_empty_project_returns_empty_lists(
+        self, server: JournalMCPServer
+    ) -> None:
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_context", {"project": "berry-gym"}
+            )
+
+        assert result.data == {
+            "project": "berry-gym",
+            "recent": [],
+            "open_items": [],
+            "recent_bugfixes": [],
+            "recent_decisions": [],
+            "related_projects": [],
+            "suggested_searches": [],
+        }
+
+    async def test_can_disable_cross_project_lookup(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        now = datetime.now(tz=UTC)
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="deployment prep",
+                phase="Phase 4d",
+                timestamp=now,
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.NOTIZ,
+                content="deployment in other project",
+                timestamp=now - timedelta(minutes=1),
+            )
+        )
+
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_context",
+                {
+                    "project": "bramble",
+                    "include_cross_project": False,
+                },
+            )
+
+        assert result.data["related_projects"] == []
+        assert result.data["suggested_searches"] == ["Phase 4d", "deployment"]
+
+    async def test_rejects_non_kebab_case_project(
+        self, server: JournalMCPServer
+    ) -> None:
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="kebab-case"):
+                await client.call_tool("journal_context", {"project": "Bad Name"})
+
+    async def test_rejects_non_positive_n_recent(self, server: JournalMCPServer) -> None:
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="positive"):
+                await client.call_tool(
+                    "journal_context",
+                    {"project": "bramble", "n_recent": 0},
                 )
 
 

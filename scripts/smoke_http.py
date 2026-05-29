@@ -29,16 +29,17 @@ every write the script makes goes into that project.
 
 What it does
 ------------
-1. Connects with the token, lists tools, checks all six are present.
+1. Connects with the token, lists tools, checks all seven are present.
 2. Verifies a tokenless request is rejected (auth gate is on).
 3. Appends two journal entries to ``--project``.
 4. Reads them back via ``journal_read``.
 5. Searches for a keyword only one entry contains.
-6. Searches for that keyword via filtered ``journal_search_all``.
-7. Verifies the entries appear in ``journal_digest``.
-8. Verifies a write into a *foreign* project is rejected (Decision B).
-9. Calls ``journal_list_projects`` and prints the aggregate view.
-10. Issues two deliberately bad calls (unknown status, non-kebab
+6. Calls ``journal_context`` and verifies the curated shape.
+7. Searches for that keyword via filtered ``journal_search_all``.
+8. Verifies the entries appear in ``journal_digest``.
+9. Verifies a write into a *foreign* project is rejected (Decision B).
+10. Calls ``journal_list_projects`` and prints the aggregate view.
+11. Issues two deliberately bad calls (unknown status, non-kebab
    project) to verify clean ``ToolError`` translation.
 
 Exit codes
@@ -131,6 +132,7 @@ def unwrap(result: Any) -> Any:
 EXPECTED_TOOLS = {
     "journal_read",
     "journal_append",
+    "journal_context",
     "journal_digest",
     "journal_search",
     "journal_search_all",
@@ -152,7 +154,7 @@ async def run_smoke(url: str, token: str, project: str) -> int:
         if missing:
             fail(f"missing expected tools: {sorted(missing)}")
             return 1
-        ok("all six expected tools are registered")
+        ok("all seven expected tools are registered")
 
         # ------------------------------------------------------------------
         # 2. The auth gate rejects a tokenless request
@@ -242,7 +244,43 @@ async def run_smoke(url: str, token: str, project: str) -> int:
         ok("FTS5 search found exactly the beta entry")
 
         # ------------------------------------------------------------------
-        # 6. Cross-project search with filters
+        # 6. Curated context
+        # ------------------------------------------------------------------
+        section(f"journal_context for {project!r}")
+        result = await client.call_tool(
+            "journal_context",
+            {"project": project, "n_recent": 5},
+        )
+        context_payload = unwrap(result)
+        print(
+            "  context keys: "
+            f"{sorted(context_payload.keys())}"
+        )
+        expected_context_keys = {
+            "project",
+            "recent",
+            "open_items",
+            "recent_bugfixes",
+            "recent_decisions",
+            "related_projects",
+            "suggested_searches",
+        }
+        if set(context_payload) != expected_context_keys:
+            fail(
+                "unexpected context payload keys: "
+                f"{sorted(context_payload.keys())}"
+            )
+            return 1
+        if context_payload["project"] != project:
+            fail(
+                f"expected context project {project!r}; "
+                f"got {context_payload['project']!r}"
+            )
+            return 1
+        ok("journal_context returned expected top-level structure")
+
+        # ------------------------------------------------------------------
+        # 7. Cross-project search with filters
         # ------------------------------------------------------------------
         section(f"journal_search_all for {needle!r}")
         result = await client.call_tool(
@@ -265,7 +303,7 @@ async def run_smoke(url: str, token: str, project: str) -> int:
         ok("cross-project search found the beta entry with filters")
 
         # ------------------------------------------------------------------
-        # 7. Digest
+        # 8. Digest
         # ------------------------------------------------------------------
         section(f"journal_digest for {project!r}")
         result = await client.call_tool(
@@ -285,7 +323,7 @@ async def run_smoke(url: str, token: str, project: str) -> int:
         ok("digest includes the smoke entries")
 
         # ------------------------------------------------------------------
-        # 8. Write-scope binding: a foreign project is refused
+        # 9. Write-scope binding: a foreign project is refused
         # ------------------------------------------------------------------
         section(f"write-scope check (append into {FOREIGN_PROJECT!r})")
         try:
@@ -307,7 +345,7 @@ async def run_smoke(url: str, token: str, project: str) -> int:
             return 1
 
         # ------------------------------------------------------------------
-        # 9. Overview after writes
+        # 10. Overview after writes
         # ------------------------------------------------------------------
         section("journal_list_projects (after writes)")
         result = await client.call_tool("journal_list_projects", {})
@@ -323,7 +361,7 @@ async def run_smoke(url: str, token: str, project: str) -> int:
         ok(f"{project!r} appears in the overview")
 
         # ------------------------------------------------------------------
-        # 10. Negative: unknown status
+        # 11. Negative: unknown status
         # ------------------------------------------------------------------
         section("negative test: unknown status")
         try:
@@ -341,7 +379,7 @@ async def run_smoke(url: str, token: str, project: str) -> int:
             return 1
 
         # ------------------------------------------------------------------
-        # 11. Negative: non-kebab project name
+        # 12. Negative: non-kebab project name
         # ------------------------------------------------------------------
         section("negative test: non-kebab project name")
         try:

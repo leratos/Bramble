@@ -61,6 +61,7 @@ Der Client sollte nach erfolgreicher Verbindung diese Tools sehen:
 | `journal_append(project, status, content, phase=None, title=None)` | Neuen Eintrag schreiben |
 | `journal_search(project, query, limit=20)` | Volltextsuche in einem Projekt |
 | `journal_search_all(...)` | Volltextsuche ueber alle Projekte mit optionalen Filtern |
+| `journal_context(project, n_recent=10, include_cross_project=True)` | Kuratierter Session-Startkontext fuer ein Projekt |
 | `journal_digest(...)` | Zeitraum-Digest mit Counts, offenen Punkten, Bugfixes und Entscheidungen |
 | `journal_list_projects()` | Projekte mit Counts und letzter Aktivität listen |
 
@@ -73,6 +74,8 @@ und Suchen bleiben projektübergreifend.
 Zu Beginn einer Bramble-Session:
 
 1. `journal_read(project="bramble", n=20)` aufrufen.
+  Optional bevorzugt: `journal_context(project="bramble", n_recent=10)` fuer
+  einen kuratierten Startpunkt.
 2. Bei unklarer Historie gezielt suchen, z. B.
    `journal_search(project="bramble", query="Phase 4", limit=10)`.
    Wenn das relevante Projekt unklar ist, `journal_search_all(...)` nutzen.
@@ -152,8 +155,10 @@ Nutze Bramble als projektbezogenes Entwicklungsjournal.
 
 Projekt: bramble
 
-Zu Beginn relevanter Arbeit rufe journal_read(project="bramble", n=20)
-auf. Suche bei Bedarf mit journal_search(project="bramble", query=...)
+Zu Beginn relevanter Arbeit rufe bevorzugt
+journal_context(project="bramble", n_recent=10) auf.
+Alternativ journal_read(project="bramble", n=20).
+Suche bei Bedarf mit journal_search(project="bramble", query=...)
 oder projektuebergreifend mit journal_search_all(query=...).
 Schreibe am Ende substanzieller Arbeit einen journal_append-Eintrag.
 Bestehende Einträge werden nicht geändert; Korrekturen erfolgen als neue
@@ -163,7 +168,7 @@ Nutze nur Statuswerte: in_arbeit, abgeschlossen, notiz, bugfix.
 
 ## Verifikation eines neuen Clients
 
-1. Tool-Liste prüfen: alle sechs Bramble-Tools müssen sichtbar sein.
+1. Tool-Liste prüfen: alle sieben Bramble-Tools müssen sichtbar sein.
 2. Lesen testen:
 
 ```text
@@ -188,7 +193,13 @@ journal_search_all(query="Backup", limit=5)
 journal_digest(project="bramble", since="7d")
 ```
 
-6. Schreibtest nur als echten Journal-Eintrag ausführen, nicht als
+6. Session-Kontext testen:
+
+```text
+journal_context(project="bramble", n_recent=10)
+```
+
+7. Schreibtest nur als echten Journal-Eintrag ausführen, nicht als
    beliebigen Smoke-Eintrag. Beispiel: `title="Client <name> angebunden"`.
 
 Wenn ein Schreibtest fehlschlägt, zuerst prüfen:
