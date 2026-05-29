@@ -1,0 +1,33 @@
+#!/bin/sh
+set -eu
+
+if [ "${BRAMBLE_SKIP_GUARDRAILS:-}" = "1" ]; then
+    exit 0
+fi
+
+branch="$(git branch --show-current 2>/dev/null || true)"
+
+if [ -z "$branch" ]; then
+    echo "pre-commit: detached HEAD. Set BRAMBLE_SKIP_GUARDRAILS=1 only for an intentional emergency commit." >&2
+    exit 1
+fi
+
+case "$branch" in
+    main|master)
+        echo "pre-commit: refusing direct commits on $branch. Create a feature/fix/chore branch first." >&2
+        exit 1
+        ;;
+    feature/phase-*|feature/*|fix/*|bugfix/*|hotfix/*|chore/*|docs/*|refactor/*|test/*|codex/*)
+        ;;
+    *)
+        echo "pre-commit: branch '$branch' does not match the Bramble branch policy." >&2
+        echo "Expected examples: feature/phase-4e-short-title, chore/short-title, docs/short-title." >&2
+        exit 1
+        ;;
+esac
+
+journal_staged="$(git diff --cached --name-only --diff-filter=ACMR -- docs/journal.txt 2>/dev/null || true)"
+if [ -n "$journal_staged" ]; then
+    echo "pre-commit: docs/journal.txt is historical only. Use Bramble MCP journal_append instead." >&2
+    exit 1
+fi

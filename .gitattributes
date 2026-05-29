@@ -1,0 +1,4 @@
+# Versioned git hooks and shell scripts must keep LF endings so they run on
+# the Linux host (journal.last-strawberry.com).
+.githooks/** text eol=lf
+*.sh text eol=lf
