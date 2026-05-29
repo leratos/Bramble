@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}Hilfe - Bramble Admin{% endblock %}
+
+{% block content %}
+  <section class="page-head" aria-labelledby="help-title">
+    <div>
+      <p class="eyebrow">Hilfe</p>
+      <h1 id="help-title">Hilfe</h1>
+      <p>Kurzer Leitfaden für Journal-Arbeit und Admin-UI.</p>
+    </div>
+  </section>
+
+  <section class="action-panel" aria-labelledby="workflow-title">
+    <h2 id="workflow-title">Workflow-Hinweise</h2>
+    <p>Journal-Einträge bleiben append-only. Bestehende Einträge werden nicht editiert oder gelöscht; Korrekturen werden als neuer Nachtrag oder Bugfix ergänzt.</p>
+
+    <p><strong>Status-Empfehlung:</strong></p>
+    <div class="chip-list" aria-label="Status-Empfehlung">
+      {% for status in workflow.statuses %}
+        <span>{{ status }}</span>
+      {% endfor %}
+    </div>
+
+    <p><strong>Tag-Vorschläge:</strong></p>
+    <div class="chip-list" aria-label="Tag-Vorschläge">
+      {% for tag in workflow.suggested_tags %}
+        <span>{{ tag }}</span>
+      {% endfor %}
+    </div>
+
+    <p><strong>Abschluss-Checkliste:</strong></p>
+    <ul>
+      {% for item in workflow.completion_checklist %}
+        <li>{{ item }}</li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="action-panel" aria-labelledby="entry-help-title">
+    <h2 id="entry-help-title">Einträge erstellen</h2>
+    <p>Der Korrektur-Assistent auf jeder Projektseite erstellt neue Journal-Einträge direkt in diesem Projekt.</p>
+    <ul>
+      <li><strong>Nachtrag:</strong> nutzt den Status <code>notiz</code> und kann per Bezugs-ID Kontext zu einem bestehenden Eintrag ergänzen.</li>
+      <li><strong>Bugfix:</strong> nutzt den Status <code>bugfix</code> und kann per korrigierter Eintrags-ID eine <code>corrects</code>-Relation setzen.</li>
+      <li>Aktionslinks an Einträgen füllen die passende Bezugs-ID automatisch vor.</li>
+    </ul>
+  </section>
+
+  <section class="action-panel" aria-labelledby="open-help-title">
+    <h2 id="open-help-title">Offene Punkte</h2>
+    <p>Die Kennzahl zeigt alle effektiv offenen Punkte. Die Listen sind bewusst begrenzte Vorschauen: Dashboard zeigt die neuesten 10, Projektseiten zeigen die neuesten 5.</p>
+    <p>Ein offener Punkt gilt als geschlossen, wenn ein neuerer Abschluss, Bugfix oder Nachtrag ihn eindeutig per Link, Textverweis, Phase, Titel oder Basis-Titel abdeckt.</p>
+  </section>
+
+  <section class="action-panel" aria-labelledby="search-help-title">
+    <h2 id="search-help-title">Suche und Filter</h2>
+    <p>Die globale Suche nutzt SQLite FTS5. Status, Projekt, Zeitraum und Tags schränken Treffer ein; mehrere Tags werden gemeinsam angewendet.</p>
+    <p>Für einfache Suche reichen normale Wörter. Für exakte Formulierungen können Begriffe in Anführungszeichen gesetzt werden.</p>
+  </section>
+{% endblock %}

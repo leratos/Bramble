@@ -84,29 +84,6 @@
     </div>
   </section>
 
-  <section class="action-panel" aria-labelledby="workflow-title">
-    <h2 id="workflow-title">Phase-4e Workflow-Hinweise</h2>
-    <p>Journal-Einträge bleiben append-only. Erstellung ist über MCP-Clients und den Korrektur-Assistenten möglich.</p>
-    <p><strong>Status-Empfehlung:</strong></p>
-    <div class="chip-list" aria-label="Status-Empfehlung">
-      {% for status in workflow.statuses %}
-        <span>{{ status }}</span>
-      {% endfor %}
-    </div>
-    <p><strong>Tag-Vorschläge:</strong></p>
-    <div class="chip-list" aria-label="Tag-Vorschläge">
-      {% for tag in workflow.suggested_tags %}
-        <span>{{ tag }}</span>
-      {% endfor %}
-    </div>
-    <p><strong>Abschluss-Checkliste:</strong></p>
-    <ul>
-      {% for item in workflow.completion_checklist %}
-        <li>{{ item }}</li>
-      {% endfor %}
-    </ul>
-  </section>
-
   <section class="entry-section" aria-labelledby="recent-title">
     <h2 id="recent-title">Letzte Einträge</h2>
     <div class="entry-list">

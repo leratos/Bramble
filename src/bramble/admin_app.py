@@ -139,6 +139,7 @@ def create_admin_app(
         Route("/logout", logout, methods=["POST"], name="logout"),
         Route("/projects", projects_index, methods=["GET"], name="projects"),
         Route("/search", global_search, methods=["GET"], name="global_search"),
+        Route("/help", help_page, methods=["GET"], name="help"),
         Route("/tokens", tokens_index, methods=["GET"], name="tokens"),
         Route("/tokens", token_create, methods=["POST"], name="token_create"),
         Route(
@@ -406,7 +407,6 @@ async def dashboard(request: Request) -> Response:
     ctx = _ctx(request)
     projects = ctx.read_model.projects()
     stats = ctx.read_model.dashboard_stats()
-    workflow = ctx.read_model.workflow_guidance()
     return _render(
         request,
         "dashboard.html",
@@ -416,6 +416,25 @@ async def dashboard(request: Request) -> Response:
             "active_project": None,
             "csrf_token": session.csrf_token,
             "stats": stats,
+        },
+    )
+
+
+async def help_page(request: Request) -> Response:
+    session = _current_session(request)
+    if session is None:
+        return _login_redirect(request)
+    ctx = _ctx(request)
+    projects = ctx.read_model.projects()
+    workflow = ctx.read_model.workflow_guidance()
+    return _render(
+        request,
+        "help.html",
+        {
+            "actor": session.actor,
+            "projects": _project_rows(projects),
+            "active_project": None,
+            "csrf_token": session.csrf_token,
             "workflow": workflow,
         },
     )

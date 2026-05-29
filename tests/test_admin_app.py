@@ -105,6 +105,12 @@ class TestAdminApp:
         assert response.status_code == 303
         assert response.headers["location"] == "/login?next=/search"
 
+    def test_help_requires_login(self, admin_client: TestClient) -> None:
+        response = admin_client.get("/help", follow_redirects=False)
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/login?next=/help"
+
     def test_successful_login_sets_hardened_cookie(
         self, admin_client: TestClient
     ) -> None:
@@ -191,7 +197,7 @@ class TestAdminApp:
             response.text,
         )
 
-    def test_dashboard_renders_workflow_guidance_panel(
+    def test_dashboard_links_help_without_workflow_panel(
         self, admin_client: TestClient
     ) -> None:
         _login(admin_client)
@@ -199,10 +205,27 @@ class TestAdminApp:
         response = admin_client.get("/")
 
         assert response.status_code == 200
-        assert "Phase-4e Workflow-Hinweise" in response.text
+        assert 'href="http://testserver/help">Hilfe</a>' in response.text
+        assert "Workflow-Hinweise" not in response.text
+        assert "Phase-4e" not in response.text
+
+    def test_help_renders_workflow_guidance(
+        self, admin_client: TestClient
+    ) -> None:
+        _login(admin_client)
+
+        response = admin_client.get("/help")
+
+        assert response.status_code == 200
+        assert "Workflow-Hinweise" in response.text
+        assert "Phase-4e" not in response.text
         assert "in_arbeit" in response.text
         assert "decision" in response.text
         assert "Append-only Journal-Eintrag geschrieben" in response.text
+        assert "Einträge erstellen" in response.text
+        assert "Korrektur-Assistent" in response.text
+        assert "Offene Punkte" in response.text
+        assert "Suche und Filter" in response.text
 
     def test_dashboard_formats_timestamps_in_display_timezone(
         self, admin_client: TestClient, db: JournalDB
