@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 _PROJECT_STATUSES = {"active", "paused", "archived"}
 _SEARCH_ALL_LIMIT_MAX = 100
 _DIGEST_LIMIT_MAX = 100
+_OPEN_ITEMS_LIMIT_MAX = 100
 _CONTEXT_N_RECENT_MAX = 100
 _CONTEXT_RELATED_PROJECTS_MAX = 5
 _CONTEXT_RELATED_SEARCH_LIMIT = 20
@@ -570,6 +571,38 @@ class JournalDB:
             decisions=tuple(entry for entry in entries if _entry_is_decision(entry)),
         )
 
+    def open_items(
+        self,
+        *,
+        project: str | None = None,
+        limit: int = 50,
+    ) -> list[JournalEntry]:
+        """Return newest open work items (``status='in_arbeit'``)."""
+
+        self._validate_open_items_limit_arg(limit)
+        if project is not None:
+            self._validate_project_arg(project)
+            project = project.strip()
+
+        where = ["status = ?"]
+        params: list[object] = [JournalStatus.IN_ARBEIT.value]
+        if project is not None:
+            where.append("project = ?")
+            params.append(project)
+
+        sql = (
+            "SELECT id, project, timestamp, status, phase, title, content, "
+            "       actor, client, source "
+            "FROM journal_entries "
+            f"WHERE {' AND '.join(where)} "
+            "ORDER BY timestamp DESC, id DESC "
+            "LIMIT ?"
+        )
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+            return self._rows_to_entries(conn, rows)
+
     def project_overview(self) -> list[ProjectSummary]:
         """Return one :class:`ProjectSummary` per project, newest activity first.
 
@@ -746,6 +779,12 @@ class JournalDB:
         JournalDB._validate_limit_arg(value, name="n_recent")
         if value > _CONTEXT_N_RECENT_MAX:
             raise ValueError(f"n_recent must be at most {_CONTEXT_N_RECENT_MAX}")
+
+    @staticmethod
+    def _validate_open_items_limit_arg(value: object) -> None:
+        JournalDB._validate_limit_arg(value, name="limit")
+        if value > _OPEN_ITEMS_LIMIT_MAX:
+            raise ValueError(f"limit must be at most {_OPEN_ITEMS_LIMIT_MAX}")
 
 
 def _migrate_projects_from_entries(conn: sqlite3.Connection) -> None:

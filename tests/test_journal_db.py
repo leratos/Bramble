@@ -553,6 +553,98 @@ class TestDigest:
 
 
 # ---------------------------------------------------------------------------
+# open_items()
+# ---------------------------------------------------------------------------
+class TestOpenItems:
+    def test_open_items_returns_newest_in_arbeit_entries(self, db: JournalDB) -> None:
+        now = datetime(2026, 5, 29, 12, 0, tzinfo=UTC)
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content="open-old",
+                timestamp=now - timedelta(hours=2),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.BUGFIX,
+                content="closed",
+                timestamp=now - timedelta(hours=1),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                content="open-new",
+                timestamp=now,
+            )
+        )
+
+        result = db.open_items(limit=10)
+
+        assert [entry.content for entry in result] == ["open-new", "open-old"]
+        assert all(entry.status is JournalStatus.IN_ARBEIT for entry in result)
+
+    def test_open_items_filters_by_project(self, db: JournalDB) -> None:
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content="open bramble",
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                content="open elder",
+            )
+        )
+
+        result = db.open_items(project="bramble", limit=10)
+
+        assert [entry.content for entry in result] == ["open bramble"]
+
+    def test_open_items_respects_limit(self, db: JournalDB) -> None:
+        for i in range(5):
+            db.append(
+                JournalEntry(
+                    project="bramble",
+                    status=JournalStatus.IN_ARBEIT,
+                    content=f"open-{i}",
+                    timestamp=datetime(2026, 5, 29, 12, i, tzinfo=UTC),
+                )
+            )
+
+        result = db.open_items(limit=2)
+
+        assert len(result) == 2
+        assert [entry.content for entry in result] == ["open-4", "open-3"]
+
+    def test_open_items_returns_empty_for_no_open_entries(self, db: JournalDB) -> None:
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="note",
+            )
+        )
+
+        assert db.open_items(limit=10) == []
+
+    def test_open_items_rejects_limit_above_cap(self, db: JournalDB) -> None:
+        with pytest.raises(ValueError, match="at most 100"):
+            db.open_items(limit=101)
+
+    def test_open_items_rejects_non_positive_limit(self, db: JournalDB) -> None:
+        with pytest.raises(ValueError, match="positive"):
+            db.open_items(limit=0)
+
+
+# ---------------------------------------------------------------------------
 # context()
 # ---------------------------------------------------------------------------
 class TestContext:

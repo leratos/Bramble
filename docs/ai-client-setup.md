@@ -63,6 +63,7 @@ Der Client sollte nach erfolgreicher Verbindung diese Tools sehen:
 | `journal_search_all(...)` | Volltextsuche ueber alle Projekte mit optionalen Filtern |
 | `journal_context(project, n_recent=10, include_cross_project=True)` | Kuratierter Session-Startkontext fuer ein Projekt |
 | `journal_digest(...)` | Zeitraum-Digest mit Counts, offenen Punkten, Bugfixes und Entscheidungen |
+| `journal_open_items(project=None, limit=50)` | Offene Arbeitspunkte neueste zuerst, optional pro Projekt gefiltert |
 | `journal_list_projects()` | Projekte mit Counts und letzter Aktivität listen |
 
 `journal_append` ist an das Projekt des Tokens gebunden. Ein
@@ -168,39 +169,45 @@ Nutze nur Statuswerte: in_arbeit, abgeschlossen, notiz, bugfix.
 
 ## Verifikation eines neuen Clients
 
-1. Tool-Liste prüfen: alle sieben Bramble-Tools müssen sichtbar sein.
-2. Lesen testen:
+1. Tool-Liste prüfen: alle acht Bramble-Tools müssen sichtbar sein.
+1. Lesen testen:
 
 ```text
 journal_read(project="bramble", n=5)
 ```
 
-3. Suche testen:
+1. Suche testen:
 
 ```text
 journal_search(project="bramble", query="Backup", limit=5)
 ```
 
-4. Projektuebergreifende Suche testen:
+1. Projektuebergreifende Suche testen:
 
 ```text
 journal_search_all(query="Backup", limit=5)
 ```
 
-5. Digest testen:
+1. Digest testen:
 
 ```text
 journal_digest(project="bramble", since="7d")
 ```
 
-6. Session-Kontext testen:
+1. Session-Kontext testen:
 
 ```text
 journal_context(project="bramble", n_recent=10)
 ```
 
-7. Schreibtest nur als echten Journal-Eintrag ausführen, nicht als
-   beliebigen Smoke-Eintrag. Beispiel: `title="Client <name> angebunden"`.
+1. Open-Items testen:
+
+```text
+journal_open_items(project="bramble", limit=10)
+```
+
+1. Schreibtest nur als echten Journal-Eintrag ausführen, nicht als
+  beliebigen Smoke-Eintrag. Beispiel: `title="Client <name> angebunden"`.
 
 Wenn ein Schreibtest fehlschlägt, zuerst prüfen:
 

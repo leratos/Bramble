@@ -319,8 +319,8 @@ class JournalMCPServer:
                 "to fetch recent entries, journal_search or "
                 "journal_search_all for full-text search, journal_context "
                 "for curated session-start context, journal_digest for "
-                "period summaries, and journal_list_projects for an "
-                "overview."
+                "period summaries, journal_open_items for open-task "
+                "snapshots, and journal_list_projects for an overview."
             ),
         )
         self._register_tools()
@@ -527,6 +527,28 @@ class JournalMCPServer:
                 include_cross_project=include_cross_project,
             )
             return _context_to_dict(context)
+
+        @app.tool
+        @translate_errors
+        async def journal_open_items(
+            project: str | None = None,
+            limit: int = 50,
+        ) -> list[dict[str, Any]]:
+            """Return newest open work items.
+
+            Open items are entries with ``status='in_arbeit'``.
+            Optional ``project`` narrows to one project; otherwise the
+            result is cross-project. At most 100 rows can be requested.
+            """
+
+            if project is not None:
+                _require_kebab_case(project)
+            entries = await asyncio.to_thread(
+                db.open_items,
+                project=project,
+                limit=limit,
+            )
+            return [_entry_to_dict(entry) for entry in entries]
 
         @app.tool
         @translate_errors

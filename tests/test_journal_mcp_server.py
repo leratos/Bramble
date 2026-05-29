@@ -163,6 +163,7 @@ class TestToolRegistry:
             "journal_context",
             "journal_digest",
             "journal_list_projects",
+            "journal_open_items",
             "journal_read",
             "journal_search",
             "journal_search_all",
@@ -934,6 +935,86 @@ class TestJournalContext:
                 await client.call_tool(
                     "journal_context",
                     {"project": "bramble", "n_recent": 0},
+                )
+
+
+# ---------------------------------------------------------------------------
+# journal_open_items
+# ---------------------------------------------------------------------------
+class TestJournalOpenItems:
+    async def test_happy_path_returns_newest_open_items(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        now = datetime.now(tz=UTC)
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content="open older",
+                timestamp=now - timedelta(minutes=2),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="not open",
+                timestamp=now - timedelta(minutes=1),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                content="open newer",
+                timestamp=now,
+            )
+        )
+
+        async with Client(server.app) as client:
+            result = await client.call_tool("journal_open_items", {"limit": 10})
+
+        assert [row["content"] for row in result.data] == [
+            "open newer",
+            "open older",
+        ]
+        assert [row["status"] for row in result.data] == ["in_arbeit", "in_arbeit"]
+
+    async def test_filters_by_project(self, server: JournalMCPServer, db: JournalDB) -> None:
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content="open bramble",
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                content="open elder",
+            )
+        )
+
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_open_items", {"project": "bramble", "limit": 10}
+            )
+
+        assert [row["content"] for row in result.data] == ["open bramble"]
+
+    async def test_rejects_non_kebab_case_project(self, server: JournalMCPServer) -> None:
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="kebab-case"):
+                await client.call_tool(
+                    "journal_open_items", {"project": "Bad Name"}
+                )
+
+    async def test_rejects_limit_above_cap(self, server: JournalMCPServer) -> None:
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="at most 100"):
+                await client.call_tool(
+                    "journal_open_items", {"limit": 101}
                 )
 
 

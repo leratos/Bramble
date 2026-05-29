@@ -29,7 +29,7 @@ every write the script makes goes into that project.
 
 What it does
 ------------
-1. Connects with the token, lists tools, checks all seven are present.
+1. Connects with the token, lists tools, checks all eight are present.
 2. Verifies a tokenless request is rejected (auth gate is on).
 3. Appends two journal entries to ``--project``.
 4. Reads them back via ``journal_read``.
@@ -37,9 +37,10 @@ What it does
 6. Calls ``journal_context`` and verifies the curated shape.
 7. Searches for that keyword via filtered ``journal_search_all``.
 8. Verifies the entries appear in ``journal_digest``.
-9. Verifies a write into a *foreign* project is rejected (Decision B).
-10. Calls ``journal_list_projects`` and prints the aggregate view.
-11. Issues two deliberately bad calls (unknown status, non-kebab
+9. Verifies the entries appear in ``journal_open_items``.
+10. Verifies a write into a *foreign* project is rejected (Decision B).
+11. Calls ``journal_list_projects`` and prints the aggregate view.
+12. Issues two deliberately bad calls (unknown status, non-kebab
    project) to verify clean ``ToolError`` translation.
 
 Exit codes
@@ -134,6 +135,7 @@ EXPECTED_TOOLS = {
     "journal_append",
     "journal_context",
     "journal_digest",
+    "journal_open_items",
     "journal_search",
     "journal_search_all",
     "journal_list_projects",
@@ -154,7 +156,7 @@ async def run_smoke(url: str, token: str, project: str) -> int:
         if missing:
             fail(f"missing expected tools: {sorted(missing)}")
             return 1
-        ok("all seven expected tools are registered")
+        ok("all eight expected tools are registered")
 
         # ------------------------------------------------------------------
         # 2. The auth gate rejects a tokenless request
@@ -183,7 +185,7 @@ async def run_smoke(url: str, token: str, project: str) -> int:
             "journal_append",
             {
                 "project": project,
-                "status": "notiz",
+                "status": "in_arbeit",
                 "content": f"smoke run {run_marker}: alpha entry",
                 "phase": "Phase 3",
                 "title": "Smoke alpha",
@@ -323,7 +325,22 @@ async def run_smoke(url: str, token: str, project: str) -> int:
         ok("digest includes the smoke entries")
 
         # ------------------------------------------------------------------
-        # 9. Write-scope binding: a foreign project is refused
+        # 9. Open items
+        # ------------------------------------------------------------------
+        section(f"journal_open_items for {project!r}")
+        result = await client.call_tool(
+            "journal_open_items",
+            {"project": project, "limit": 10},
+        )
+        open_items = unwrap(result)
+        open_item_ids = {entry["id"] for entry in open_items}
+        if alpha["id"] not in open_item_ids:
+            fail("open items did not include the current run's in_arbeit entries")
+            return 1
+        ok("open items includes current run entries")
+
+        # ------------------------------------------------------------------
+        # 10. Write-scope binding: a foreign project is refused
         # ------------------------------------------------------------------
         section(f"write-scope check (append into {FOREIGN_PROJECT!r})")
         try:
@@ -345,7 +362,7 @@ async def run_smoke(url: str, token: str, project: str) -> int:
             return 1
 
         # ------------------------------------------------------------------
-        # 10. Overview after writes
+        # 11. Overview after writes
         # ------------------------------------------------------------------
         section("journal_list_projects (after writes)")
         result = await client.call_tool("journal_list_projects", {})
@@ -361,7 +378,7 @@ async def run_smoke(url: str, token: str, project: str) -> int:
         ok(f"{project!r} appears in the overview")
 
         # ------------------------------------------------------------------
-        # 11. Negative: unknown status
+        # 12. Negative: unknown status
         # ------------------------------------------------------------------
         section("negative test: unknown status")
         try:
@@ -379,7 +396,7 @@ async def run_smoke(url: str, token: str, project: str) -> int:
             return 1
 
         # ------------------------------------------------------------------
-        # 12. Negative: non-kebab project name
+        # 13. Negative: non-kebab project name
         # ------------------------------------------------------------------
         section("negative test: non-kebab project name")
         try:
