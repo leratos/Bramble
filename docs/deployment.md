@@ -229,6 +229,46 @@ NordVPN Dedicated IP und dokumentierte Break-Glass-Ausnahmen
 eingeschränkt werden. Firewall-Änderungen nur mit zweiter offener
 SSH-Session und Rollback-Fenster ausrollen.
 
+### 5c. Phase-4d Kontextfeatures verifizieren
+
+Nach Deploy der Phase-4d-Aenderungen (journal_context,
+journal_digest, journal_open_items plus Admin-Kontextpanel) gezielt
+verifizieren:
+
+```sh
+cd /opt/bramble
+sudo -u bramble /opt/bramble/.venv/bin/python scripts/smoke_http.py \
+    --url https://journal.last-strawberry.com/mcp/ \
+    --token <bramble-token> \
+    --project bramble \
+    --mode read-only
+```
+
+Erwartung read-only Smoke:
+
+* Tool-Discovery zeigt alle acht MCP-Tools.
+* `journal_context`, `journal_digest` und `journal_open_items`
+  antworten in stabiler Form.
+* Negativcheck non-kebab Projektname wird sauber abgelehnt.
+
+Optional write-light Smoke (schreibt Testeintraege):
+
+```sh
+cd /opt/bramble
+sudo -u bramble /opt/bramble/.venv/bin/python scripts/smoke_http.py \
+    --url https://journal.last-strawberry.com/mcp/ \
+    --token <bramble-token> \
+    --project bramble \
+    --mode write-light
+```
+
+Admin-UI Kurzchecks fuer Kontextpanel:
+
+* Dashboard zeigt die Snapshot-Karten fuer offene Punkte,
+  7-Tage-Bugfixes und 7-Tage-Entscheidungen.
+* Projektansicht zeigt das neue Kontextpanel (offene Punkte, letzte
+  Bugfixes, letzte Entscheidungen).
+
 ---
 
 ## 6. Nginx-Reverse-Proxy über Plesk

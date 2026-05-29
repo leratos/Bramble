@@ -175,6 +175,16 @@ class TestJournalDBInit:
             }
         assert "journal_entry_links" in tables
 
+    def test_initialize_creates_open_items_status_index(self, db: JournalDB) -> None:
+        with sqlite3.connect(db.db_path) as conn:
+            indexes = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'index'"
+                )
+            }
+        assert "idx_status_ts" in indexes
+
 
 # ---------------------------------------------------------------------------
 # append()

@@ -29,6 +29,8 @@ every write the script makes goes into that project.
 
 What it does
 ------------
+Mode ``write-light`` (default):
+
 1. Connects with the token, lists tools, checks all eight are present.
 2. Verifies a tokenless request is rejected (auth gate is on).
 3. Appends two journal entries to ``--project``.
@@ -42,6 +44,15 @@ What it does
 11. Calls ``journal_list_projects`` and prints the aggregate view.
 12. Issues two deliberately bad calls (unknown status, non-kebab
    project) to verify clean ``ToolError`` translation.
+
+Mode ``read-only``:
+
+1. Connects with the token, lists tools, checks all eight are present.
+2. Verifies a tokenless request is rejected (auth gate is on).
+3. Exercises read tools only (`journal_read`, `journal_context`,
+    `journal_search`, `journal_search_all`, `journal_digest`,
+    `journal_open_items`, `journal_list_projects`).
+4. Runs one negative read validation (`project` non-kebab).
 
 Exit codes
 ----------
@@ -141,8 +152,11 @@ EXPECTED_TOOLS = {
     "journal_list_projects",
 }
 
+SMOKE_MODE_WRITE_LIGHT = "write-light"
+SMOKE_MODE_READ_ONLY = "read-only"
 
-async def run_smoke(url: str, token: str, project: str) -> int:
+
+async def run_smoke(url: str, token: str, project: str, mode: str) -> int:
     info(f"connecting to {url} as project {project!r}")
 
     async with make_client(url, token) as client:
@@ -174,8 +188,121 @@ async def run_smoke(url: str, token: str, project: str) -> int:
                 fail("server accepted a tool call without any token")
                 return 1
 
+        if mode == SMOKE_MODE_READ_ONLY:
+            # --------------------------------------------------------------
+            # 3. Read-only probes
+            # --------------------------------------------------------------
+            section(f"journal_read {project} (n=5)")
+            result = await client.call_tool(
+                "journal_read", {"project": project, "n": 5}
+            )
+            entries = unwrap(result)
+            if not isinstance(entries, list):
+                fail("journal_read did not return a list")
+                return 1
+            ok(f"journal_read returned {len(entries)} row(s)")
+
+            section(f"journal_context for {project!r}")
+            result = await client.call_tool(
+                "journal_context",
+                {"project": project, "n_recent": 5},
+            )
+            context_payload = unwrap(result)
+            expected_context_keys = {
+                "project",
+                "recent",
+                "open_items",
+                "recent_bugfixes",
+                "recent_decisions",
+                "related_projects",
+                "suggested_searches",
+            }
+            if set(context_payload) != expected_context_keys:
+                fail(
+                    "unexpected context payload keys: "
+                    f"{sorted(context_payload.keys())}"
+                )
+                return 1
+            ok("journal_context returned expected top-level structure")
+
+            section("journal_search and journal_search_all")
+            result = await client.call_tool(
+                "journal_search",
+                {"project": project, "query": "deployment", "limit": 5},
+            )
+            local_hits = unwrap(result)
+            if not isinstance(local_hits, list):
+                fail("journal_search did not return a list")
+                return 1
+            result = await client.call_tool(
+                "journal_search_all",
+                {"query": "deployment", "limit": 5},
+            )
+            global_hits = unwrap(result)
+            if not isinstance(global_hits, list):
+                fail("journal_search_all did not return a list")
+                return 1
+            ok(
+                "search calls succeeded "
+                f"(local={len(local_hits)}, global={len(global_hits)})"
+            )
+
+            section(f"journal_digest and journal_open_items for {project!r}")
+            result = await client.call_tool(
+                "journal_digest",
+                {"project": project, "since": "24h", "limit": 10},
+            )
+            digest = unwrap(result)
+            if set(digest) != {
+                "range",
+                "projects",
+                "counts_by_project",
+                "counts_by_status",
+                "entries",
+                "open_items",
+                "bugfixes",
+                "decisions",
+            }:
+                fail("journal_digest payload shape is unexpected")
+                return 1
+            result = await client.call_tool(
+                "journal_open_items",
+                {"project": project, "limit": 10},
+            )
+            open_items = unwrap(result)
+            if not isinstance(open_items, list):
+                fail("journal_open_items did not return a list")
+                return 1
+            if any(row.get("status") != "in_arbeit" for row in open_items):
+                fail("journal_open_items returned non in_arbeit rows")
+                return 1
+            ok("digest/open-items calls succeeded")
+
+            section("journal_list_projects")
+            result = await client.call_tool("journal_list_projects", {})
+            projects_after = unwrap(result)
+            if not isinstance(projects_after, list):
+                fail("journal_list_projects did not return a list")
+                return 1
+            ok(f"journal_list_projects returned {len(projects_after)} project(s)")
+
+            section("negative test: non-kebab project name")
+            try:
+                await client.call_tool("journal_read", {"project": "Bad_Name", "n": 5})
+            except ToolError as exc:
+                ok(f"rejected as expected: {exc}")
+            except Exception as exc:  # noqa: BLE001
+                fail(f"expected ToolError, got {type(exc).__name__}: {exc}")
+                return 1
+            else:
+                fail("server accepted a non-kebab project name")
+                return 1
+
+            print("\nAll read-only smoke checks passed.")
+            return 0
+
         # ------------------------------------------------------------------
-        # 3. Append two entries to the token's project
+        # 3. Append two entries to the token's project (write-light mode)
         # ------------------------------------------------------------------
         section(f"appending entries to {project!r}")
         run_marker = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -436,13 +563,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="bramble",
         help="project the token owns and the script writes to (default: bramble).",
     )
+    parser.add_argument(
+        "--mode",
+        choices=[SMOKE_MODE_WRITE_LIGHT, SMOKE_MODE_READ_ONLY],
+        default=SMOKE_MODE_WRITE_LIGHT,
+        help=(
+            "smoke mode: 'write-light' appends test entries, "
+            "'read-only' probes read tools without writes"
+        ),
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        return asyncio.run(run_smoke(args.url, args.token, args.project))
+        return asyncio.run(run_smoke(args.url, args.token, args.project, args.mode))
     except (ConnectionRefusedError, ConnectionError) as exc:
         fail(f"connection failed: {exc}")
         fail("is the server running on the URL above?")

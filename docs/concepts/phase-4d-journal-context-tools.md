@@ -1,6 +1,6 @@
 # Phase 4d - Journal-Kontexttools
 
-Status: Konzept (2026-05-29).
+Status: Umgesetzt (2026-05-29, konservativ/read-only).
 
 Dieses Dokument beschreibt neue Lese- und Kontextfunktionen fuer Bramble.
 Ziel ist, dass KI-Clients und Menschen schneller den relevanten
@@ -240,6 +240,7 @@ Neue MCP-Tools sollten zunaechst read-only bleiben:
 journal_search_all(...)
 journal_context(...)
 journal_digest(...)
+journal_open_items(...)
 ```
 
 Rueckwaertskompatibilitaet:
@@ -299,3 +300,20 @@ direkt verbessert.
 
 `journal_context` danach bauen, sobald klar ist, welche Datenstruktur
 KI-Clients in der Praxis am besten verwerten.
+
+## 13. Implementierungsstand
+
+Umgesetzt in Phase 4d:
+
+* `journal_search_all(...)`.
+* `journal_digest(...)`.
+* `journal_context(...)`.
+* `journal_open_items(...)`.
+* Admin-UI nutzt Digest/Open-Items als read-only Kontext-Snapshot im
+  Dashboard und zeigt ein Projekt-Kontextpanel in der Projektansicht.
+
+Weiterhin bewusst offen fuer spaetere Phasen:
+
+* Semantische Kontextverdichtung mit LLM (nicht im Server-MVP).
+* Erweiterte Open-Items-Logik ueber Link-Relationen (z. B. erledigt
+  durch supersedes/adds_context_to).

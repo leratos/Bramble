@@ -206,13 +206,19 @@ python scripts\smoke_http.py --token <bramble-token>
 # oder gegen einen anderen Endpoint:
 python scripts\smoke_http.py --url http://127.0.0.1:9000/mcp/ \
     --token <bramble-token>
+# read-only Variante ohne Test-Append:
+python scripts\smoke_http.py --token <bramble-token> --mode read-only
 ```
 
-Der Smoke-Test schreibt zwei Einträge in die echte DB, liest zurück,
-sucht per FTS5, prüft Auth-Gate und Token-Scope und feuert Negativtests
-(unbekannter Status, non-kebab Projektname). Mehrfaches Ausführen
-sammelt Einträge an – ggf. `data/bramble.db` löschen für einen
-sauberen Lauf.
+Im Default (`--mode write-light`) schreibt der Smoke-Test zwei Einträge
+in die echte DB, liest zurück, sucht per FTS5, prüft
+`journal_context`/`journal_digest`/`journal_open_items`, Auth-Gate,
+Token-Scope und feuert Negativtests (unbekannter Status, non-kebab
+Projektname).
+
+Mit `--mode read-only` werden nur Lese-Checks ausgeführt, inklusive
+`journal_context`, `journal_digest`, `journal_open_items` und
+`journal_list_projects`, ohne Test-Append in die DB.
 
 ## Legacy-Journals importieren
 
