@@ -60,7 +60,7 @@
   <section class="metric-grid" aria-label="Projektkontext">
     <article class="metric">
       <span>Offene Punkte</span>
-      <strong>{{ project_context.open_items|length }}</strong>
+      <strong>{{ project_context.open_item_count }}</strong>
     </article>
     <article class="metric">
       <span>Letzte Bugfixes</span>
@@ -73,7 +73,7 @@
   </section>
 
   <section class="entry-section" aria-labelledby="context-open-title">
-    <h2 id="context-open-title">Offene Punkte</h2>
+    <h2 id="context-open-title">Neueste offene Punkte</h2>
     <div class="entry-list">
       {% for entry in project_context.open_items %}
         <article class="entry" id="open-{{ entry.id }}">

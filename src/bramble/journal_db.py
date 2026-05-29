@@ -632,6 +632,15 @@ class JournalDB:
         """
 
         self._validate_open_items_limit_arg(limit)
+        entries = self._open_item_entries(project=project)
+        return entries[:limit]
+
+    def open_item_count(self, *, project: str | None = None) -> int:
+        """Return the full count of actionable open work items."""
+
+        return len(self._open_item_entries(project=project))
+
+    def _open_item_entries(self, *, project: str | None = None) -> list[JournalEntry]:
         if project is not None:
             self._validate_project_arg(project)
             project = project.strip()
@@ -655,7 +664,7 @@ class JournalDB:
                 conn,
                 self._rows_to_entries(conn, rows),
             )
-            return entries[:limit]
+            return entries
 
     def project_overview(self) -> list[ProjectSummary]:
         """Return one :class:`ProjectSummary` per project, newest activity first.

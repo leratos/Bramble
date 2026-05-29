@@ -85,6 +85,27 @@ def test_dashboard_stats_include_open_items_and_decisions(db: JournalDB) -> None
     ]
 
 
+def test_dashboard_stats_counts_all_open_items_not_preview_limit(
+    db: JournalDB,
+) -> None:
+    now = datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
+    for i in range(12):
+        db.append(
+            JournalEntry(
+                project="berry-gym",
+                status=JournalStatus.IN_ARBEIT,
+                content=f"open berry task {i}",
+                timestamp=now + timedelta(minutes=i),
+            )
+        )
+
+    stats = AdminReadModel(db).dashboard_stats(now=now)
+
+    assert stats.open_item_count == 12
+    assert len(stats.open_items) == 10
+    assert stats.open_items[0].content == "open berry task 11"
+
+
 def test_projects_include_registered_project_without_entries(db: JournalDB) -> None:
     db.register_project("berry-gym")
 
@@ -164,8 +185,30 @@ def test_project_context_returns_local_curated_context(db: JournalDB) -> None:
     context = AdminReadModel(db).project_context("bramble", n_recent=5)
 
     assert [entry.content for entry in context.open_items] == ["open local task"]
+    assert context.open_item_count == 1
     assert [entry.content for entry in context.recent_bugfixes] == ["local bugfix"]
     assert context.related_projects == ()
+
+
+def test_project_context_counts_all_open_items_not_preview_limit(
+    db: JournalDB,
+) -> None:
+    now = datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
+    for i in range(7):
+        db.append(
+            JournalEntry(
+                project="berry-gym",
+                status=JournalStatus.IN_ARBEIT,
+                content=f"open project task {i}",
+                timestamp=now + timedelta(minutes=i),
+            )
+        )
+
+    context = AdminReadModel(db).project_context("berry-gym", n_recent=5)
+
+    assert context.open_item_count == 7
+    assert len(context.open_items) == 5
+    assert context.open_items[0].content == "open project task 6"
 
 
 def test_project_context_excludes_effectively_closed_open_items(db: JournalDB) -> None:
@@ -187,6 +230,7 @@ def test_project_context_excludes_effectively_closed_open_items(db: JournalDB) -
     context = AdminReadModel(db).project_context("elder-berry")
 
     assert context.open_items == ()
+    assert context.open_item_count == 0
 
 
 def test_search_global_filters_by_status_and_since(db: JournalDB) -> None:

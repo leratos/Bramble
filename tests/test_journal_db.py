@@ -634,6 +634,22 @@ class TestOpenItems:
         assert len(result) == 2
         assert [entry.content for entry in result] == ["open-4", "open-3"]
 
+    def test_open_item_count_is_not_limited(self, db: JournalDB) -> None:
+        for i in range(12):
+            db.append(
+                JournalEntry(
+                    project="berry-gym",
+                    status=JournalStatus.IN_ARBEIT,
+                    content=f"open-{i}",
+                    timestamp=datetime(2026, 5, 29, 12, i, tzinfo=UTC),
+                )
+            )
+
+        result = db.open_items(project="berry-gym", limit=10)
+
+        assert len(result) == 10
+        assert db.open_item_count(project="berry-gym") == 12
+
     def test_open_items_returns_empty_for_no_open_entries(self, db: JournalDB) -> None:
         db.append(
             JournalEntry(

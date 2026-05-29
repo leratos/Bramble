@@ -163,10 +163,33 @@ class TestAdminApp:
         response = admin_client.get("/")
 
         assert response.status_code == 200
-        assert "Offene Arbeitspunkte" in response.text
+        assert "Neueste offene Arbeitspunkte" in response.text
         assert "open dashboard task" in response.text
         assert "7 Tage Bugfixes" in response.text
         assert "7 Tage Entscheidungen" in response.text
+
+    def test_dashboard_open_metric_uses_total_not_preview_limit(
+        self, admin_client: TestClient, db: JournalDB
+    ) -> None:
+        now = datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
+        for i in range(12):
+            db.append(
+                JournalEntry(
+                    project="berry-gym",
+                    status=JournalStatus.IN_ARBEIT,
+                    content=f"dashboard open total task {i}",
+                    timestamp=now + timedelta(minutes=i),
+                )
+            )
+        _login(admin_client)
+
+        response = admin_client.get("/")
+
+        assert response.status_code == 200
+        assert re.search(
+            r"Offene Punkte</span>\s*<strong>12</strong>",
+            response.text,
+        )
 
     def test_dashboard_renders_workflow_guidance_panel(
         self, admin_client: TestClient
@@ -450,6 +473,29 @@ class TestAdminApp:
         assert "Letzte Bugfixes" in response.text
         assert "Workflow fuer Eintragsabschluss" in response.text
         assert "Append-only Journal-Eintrag geschrieben" in response.text
+
+    def test_project_open_metric_uses_total_not_preview_limit(
+        self, admin_client: TestClient, db: JournalDB
+    ) -> None:
+        now = datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
+        for i in range(7):
+            db.append(
+                JournalEntry(
+                    project="berry-gym",
+                    status=JournalStatus.IN_ARBEIT,
+                    content=f"project open total task {i}",
+                    timestamp=now + timedelta(minutes=i),
+                )
+            )
+        _login(admin_client)
+
+        response = admin_client.get("/projects/berry-gym")
+
+        assert response.status_code == 200
+        assert re.search(
+            r"Offene Punkte</span>\s*<strong>7</strong>",
+            response.text,
+        )
 
     def test_project_view_hides_effectively_closed_open_items(
         self, admin_client: TestClient, db: JournalDB

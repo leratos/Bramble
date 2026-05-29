@@ -36,7 +36,7 @@
   <section class="metric-grid" aria-label="Kontext-Snapshot">
     <article class="metric">
       <span>Offene Punkte</span>
-      <strong>{{ stats.open_items|length }}</strong>
+      <strong>{{ stats.open_item_count }}</strong>
     </article>
     <article class="metric">
       <span>7 Tage Bugfixes</span>
@@ -53,7 +53,7 @@
   </section>
 
   <section class="entry-section" aria-labelledby="open-title">
-    <h2 id="open-title">Offene Arbeitspunkte</h2>
+    <h2 id="open-title">Neueste offene Arbeitspunkte</h2>
     <div class="entry-list">
       {% for entry in stats.open_items %}
         <article class="entry">
