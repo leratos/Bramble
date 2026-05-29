@@ -43,10 +43,43 @@ def test_dashboard_stats_count_recent_windows(db: JournalDB) -> None:
     assert stats.entries_last_24h == 1
     assert stats.entries_last_7d == 2
     assert stats.entries_last_30d == 2
+    assert stats.digest_7d.counts_by_project == {"bramble": 1, "elder-berry": 1}
+    assert stats.digest_7d.counts_by_status == {"abgeschlossen": 1, "notiz": 1}
+    assert stats.open_items == ()
     assert [entry.content for entry in stats.recent_entries] == [
         "today",
         "this week",
         "older",
+    ]
+
+
+def test_dashboard_stats_include_open_items_and_decisions(db: JournalDB) -> None:
+    now = datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
+    db.append(
+        JournalEntry(
+            project="bramble",
+            status=JournalStatus.IN_ARBEIT,
+            content="open deploy task",
+            phase="Phase 4d",
+            timestamp=now - timedelta(hours=1),
+        )
+    )
+    db.append(
+        JournalEntry(
+            project="bramble",
+            status=JournalStatus.NOTIZ,
+            title="Decision: keep dashboard read-only",
+            content="decision payload",
+            tags=["decision"],
+            timestamp=now - timedelta(hours=2),
+        )
+    )
+
+    stats = AdminReadModel(db).dashboard_stats(now=now)
+
+    assert [entry.content for entry in stats.open_items] == ["open deploy task"]
+    assert [entry.title for entry in stats.digest_7d.decisions] == [
+        "Decision: keep dashboard read-only"
     ]
 
 

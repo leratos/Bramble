@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from bramble.journal_db import JournalDB
+from bramble.journal_digest import JournalDigest
 from bramble.journal_entry import JournalEntry, JournalEntryLink
 from bramble.project_summary import ProjectSummary
 
@@ -21,6 +22,8 @@ class DashboardStats:
     entries_last_24h: int
     entries_last_7d: int
     entries_last_30d: int
+    digest_7d: JournalDigest
+    open_items: tuple[JournalEntry, ...]
     recent_entries: tuple[JournalEntry, ...]
 
 
@@ -106,6 +109,8 @@ class AdminReadModel:
         now = now.astimezone(UTC)
 
         projects = self.projects()
+        digest_7d = self._db.digest(since="7d", now=now)
+        open_items = tuple(self._db.open_items(limit=10))
         with closing(self._connect()) as conn:
             total_entries = _count_all_entries(conn)
             entries_last_24h = _count_entries_since(conn, now - timedelta(hours=24))
@@ -119,6 +124,8 @@ class AdminReadModel:
             entries_last_24h=entries_last_24h,
             entries_last_7d=entries_last_7d,
             entries_last_30d=entries_last_30d,
+            digest_7d=digest_7d,
+            open_items=open_items,
             recent_entries=recent_entries,
         )
 

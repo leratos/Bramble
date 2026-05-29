@@ -125,6 +125,43 @@ class TestAdminApp:
         assert "elder-berry" in response.text
         assert "read-only dashboard entry" in response.text
 
+    def test_dashboard_renders_open_items_and_digest_snapshot(
+        self, admin_client: TestClient, db: JournalDB
+    ) -> None:
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                title="Open item",
+                content="open dashboard task",
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.BUGFIX,
+                content="recent bugfix",
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                title="Decision: dashboard metrics",
+                content="decision note",
+                tags=["decision"],
+            )
+        )
+        _login(admin_client)
+
+        response = admin_client.get("/")
+
+        assert response.status_code == 200
+        assert "Offene Arbeitspunkte" in response.text
+        assert "open dashboard task" in response.text
+        assert "7 Tage Bugfixes" in response.text
+        assert "7 Tage Entscheidungen" in response.text
+
     def test_dashboard_formats_timestamps_in_display_timezone(
         self, admin_client: TestClient, db: JournalDB
     ) -> None:
