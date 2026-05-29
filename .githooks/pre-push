@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+if [ "${BRAMBLE_SKIP_GUARDRAILS:-}" = "1" ]; then
+    exit 0
+fi
+
+# Projekt-venv bevorzugen (Windows-Layout), sonst Linux-venv, sonst PATH.
+if [ -x ".venv/Scripts/python.exe" ]; then
+    py=".venv/Scripts/python.exe"
+elif [ -x ".venv/bin/python" ]; then
+    py=".venv/bin/python"
+else
+    py="python"
+fi
+
+echo "pre-push: running pytest before push..." >&2
+if ! "$py" -m pytest -q; then
+    echo "pre-push: tests failed. Push aborted. Set BRAMBLE_SKIP_GUARDRAILS=1 only for an intentional emergency push." >&2
+    exit 1
+fi
