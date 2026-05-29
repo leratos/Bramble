@@ -15,8 +15,12 @@ In aktiver Entwicklung. **Phase 3 – Deployment & Härtung** ist
 abgeschlossen: Bramble läuft als systemd-Service hinter Plesk/Nginx auf
 `journal.last-strawberry.com`, mit Bearer-Token-Auth, Rate-Limit,
 Fail2Ban und WAL-sicherem SQLite-Betrieb. Das Borg-Backup inklusive
-Restore-Test ist verifiziert. Nächstes Ziel: **Phase 4** (Import
-bestehender `journal.txt`-Dateien und Connector-Setup).
+Restore-Test ist verifiziert.
+
+**Phase 4d (Kontexttools)** ist abgeschlossen und hostseitig im
+read-only Smoke verifiziert. Aktueller Fokus ist **Phase 4e**:
+verbindliche Journal-Workflows und operativer Rollout fuer Admin-UI und
+Agenten.
 
 Ab Phase 4 ist Brambles aktives Projektgedaechtnis das MCP-Journal
 selbst. `docs/journal.txt` bleibt nur als historische Importquelle im
@@ -32,7 +36,7 @@ Repo und wird nicht mehr fuer neue Eintraege verwendet.
    (Plesk/Ubuntu), systemd, Nginx-Reverse-Proxy, Bearer-Token-Auth,
    Rate-Limit, Fail2Ban. ✅
 4. **Phase 4** – Import bestehender `journal.txt`-Dateien,
-   Connector-Setup in Claude.ai und Claude Code.
+    Connector-Setup in Claude.ai und Claude Code. ✅
 5. **Phase 5** – Migration aller Projekt-System-Prompts auf die
    MCP-Tools.
 

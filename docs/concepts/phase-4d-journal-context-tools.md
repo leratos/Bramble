@@ -1,6 +1,6 @@
 # Phase 4d - Journal-Kontexttools
 
-Status: Umgesetzt (2026-05-29, konservativ/read-only).
+Status: Abgeschlossen und verifiziert (2026-05-29, konservativ/read-only).
 
 Dieses Dokument beschreibt neue Lese- und Kontextfunktionen fuer Bramble.
 Ziel ist, dass KI-Clients und Menschen schneller den relevanten
@@ -317,3 +317,18 @@ Weiterhin bewusst offen fuer spaetere Phasen:
 * Semantische Kontextverdichtung mit LLM (nicht im Server-MVP).
 * Erweiterte Open-Items-Logik ueber Link-Relationen (z. B. erledigt
   durch supersedes/adds_context_to).
+
+## 14. Abschlussnachweis
+
+Phase 4d wurde funktional und betrieblich abgeschlossen.
+
+Nachweise:
+
+* Read-only Smoke gegen den Host-Endpoint erfolgreich ("All read-only
+  smoke checks passed.").
+* Relevante Regression-Suite fuer DB/MCP/Admin/Smoke-Tests gruen.
+* Runbook, README und Testabdeckung fuer den read-only Modus sind
+  dokumentiert und im Repo eingecheckt.
+
+Ab hier gilt Phase 4e als naechster Arbeitsfokus (Workflows und
+Rollout im Alltag).

@@ -1,6 +1,6 @@
 # Phase 4e - Journal-Workflows und Rollout
 
-Status: Konzept (2026-05-29).
+Status: Aktiv in Umsetzung (2026-05-29).
 
 Dieses Dokument beschreibt, wie die erweiterten Journal-Funktionen aus
 Phase 4c und 4d in der Praxis genutzt werden sollen: im Admin-UI, in
@@ -351,3 +351,63 @@ bringen.
 
 Tags und Link-Relationen zuletzt, weil sie die UI-Workflows staerker
 veraendern und sauber eingefuehrt werden sollten.
+
+## 14. Konkreter Betriebsworkflow (MVP)
+
+Dieser Abschnitt definiert den verbindlichen Tagesablauf fuer den
+Admin-Betrieb und KI-Agenten, damit Open-Items und Session-Kontext
+konsistent bleiben.
+
+### A) Session-Start (Agent)
+
+1. Immer zuerst:
+
+```text
+journal_context(project="<projekt>", n_recent=10)
+```
+
+1. Bei unklarem oder cross-project Thema:
+
+```text
+journal_search_all(query="<thema>", limit=20)
+```
+
+1. Falls aktueller Arbeitsblock neu startet: sofort ein sauberer
+  `in_arbeit`-Eintrag mit klarem Scope und naechstem Schritt.
+
+### B) Waehrend der Arbeit
+
+1. Relevante Entscheidungen als `notiz` mit Tag `decision` festhalten.
+1. Fehlerkorrekturen immer als `bugfix`, niemals alten Eintrag aendern.
+1. Deployment/Backup/Token-Ereignisse als `notiz` oder
+  `abgeschlossen` mit passenden Tags (`deployment`, `backup`,
+  `token`, `security`).
+
+### C) Session-Ende (Agent/Admin)
+
+1. Jeder substanzielle Arbeitsblock endet mit `journal_append`.
+1. Wenn ein zuvor gestarteter Block fertig ist: Abschluss-Eintrag mit
+  `status="abgeschlossen"` plus kurzer Verifikationsnotiz (Tests,
+  Smoke, Hostcheck).
+1. Offene Punkte bleiben explizit in einem `in_arbeit`-Eintrag mit
+  naechstem Schritt sichtbar.
+
+### D) Tagesabschluss im Admin-UI
+
+1. Dashboard pruefen: `24h`/`7d` Aktivitaet, offene Punkte, Bugfixes.
+1. Projektseiten mit vielen historischen `in_arbeit`-Eintraegen
+   stichprobenartig nachfassen. Dabei gilt: keine Mutation alter
+   Eintraege, stattdessen klaerende `notiz`/`abgeschlossen`-Nachtraege.
+1. Bei Token-Aktionen (`create/rotate/delete`) Audit-Trail und
+  Service-Neustart-Fenster dokumentieren.
+
+### E) Qualitaetsregeln (DoD)
+
+Ein Arbeitspaket gilt erst als "sauber abgeschlossen", wenn alle Punkte
+erfuellt sind:
+
+1. Code/Config ist committed.
+1. Relevante Tests oder Smoke-Checks sind ausgefuehrt und genannt.
+1. Journal-Eintrag wurde append-only geschrieben.
+1. Offene Folgearbeit ist explizit als naechster Schritt dokumentiert
+  (kein implizites Wissen).
