@@ -1356,7 +1356,10 @@ def _normalise_phase_key(value: str | None) -> str | None:
 def _normalise_title_key(value: str | None) -> str | None:
     if value is None:
         return None
-    key = " ".join(value.strip().lower().split())
+    # Treat punctuation as separators so variants like
+    # "Hotfix -- Foo" and "Hotfix Foo" normalize to the same key.
+    normalised = "".join(ch.lower() if ch.isalnum() else " " for ch in value)
+    key = " ".join(normalised.split())
     return key or None
 
 

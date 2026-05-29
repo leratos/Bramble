@@ -893,6 +893,34 @@ class TestOpenItems:
 
         assert [entry.id for entry in result] == [open_entry.id]
 
+    def test_open_items_excludes_entries_closed_by_title_with_punctuation_variants(
+        self,
+        db: JournalDB,
+    ) -> None:
+        open_entry = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                title="Hotfix -- Tower-Update + Self-Respawn",
+                content="start",
+                timestamp=datetime(2026, 5, 29, 12, 0, tzinfo=UTC),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.ABGESCHLOSSEN,
+                title="Hotfix Tower-Update + Self-Respawn",
+                content="done",
+                timestamp=datetime(2026, 5, 29, 12, 1, tzinfo=UTC),
+            )
+        )
+
+        result = db.open_items(project="elder-berry", limit=10)
+
+        assert result == []
+        assert open_entry.id is not None
+
 
 # ---------------------------------------------------------------------------
 # context()
