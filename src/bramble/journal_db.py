@@ -644,14 +644,15 @@ class JournalDB:
             "       actor, client, source "
             "FROM journal_entries "
             f"WHERE {' AND '.join(where)} "
-            "ORDER BY timestamp DESC, id DESC "
-            "LIMIT ?"
+            "ORDER BY timestamp DESC, id DESC"
         )
-        params.append(limit)
         with self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
-            entries = self._rows_to_entries(conn, rows)
-            return _filter_effectively_closed_open_items(conn, entries)
+            entries = _filter_effectively_closed_open_items(
+                conn,
+                self._rows_to_entries(conn, rows),
+            )
+            return entries[:limit]
 
     def project_overview(self) -> list[ProjectSummary]:
         """Return one :class:`ProjectSummary` per project, newest activity first.

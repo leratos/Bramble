@@ -740,6 +740,49 @@ class TestOpenItems:
 
         assert [entry.id for entry in result] == [open_b.id]
 
+    def test_open_items_applies_limit_after_closure_filtering(
+        self,
+        db: JournalDB,
+    ) -> None:
+        open_entries = [
+            db.append(
+                JournalEntry(
+                    project="bramble",
+                    status=JournalStatus.IN_ARBEIT,
+                    content=f"open-{index}",
+                    timestamp=datetime(2026, 5, 29, 12, 0, tzinfo=UTC)
+                    - timedelta(minutes=index),
+                )
+            )
+            for index in range(11)
+        ]
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content=(
+                    "Open-Items-Abgleich\n"
+                    f"- #{open_entries[0].id} -> #999\n"
+                    f"- #{open_entries[1].id} -> #999"
+                ),
+            )
+        )
+
+        result = db.open_items(project="bramble", limit=10)
+
+        assert len(result) == 9
+        assert [entry.content for entry in result] == [
+            "open-2",
+            "open-3",
+            "open-4",
+            "open-5",
+            "open-6",
+            "open-7",
+            "open-8",
+            "open-9",
+            "open-10",
+        ]
+
 
 # ---------------------------------------------------------------------------
 # context()
