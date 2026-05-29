@@ -168,10 +168,20 @@ class AdminReadModel:
         *,
         n_recent: int = 5,
     ) -> JournalContext:
-        return self._db.context(
+        context = self._db.context(
             project,
             n_recent=n_recent,
             include_cross_project=False,
+        )
+        open_items = tuple(self._db.open_items(project=project, limit=n_recent))
+        return JournalContext(
+            project=context.project,
+            recent=context.recent,
+            open_items=open_items,
+            recent_bugfixes=context.recent_bugfixes,
+            recent_decisions=context.recent_decisions,
+            related_projects=context.related_projects,
+            suggested_searches=context.suggested_searches,
         )
 
     def dashboard_stats(self, *, now: datetime | None = None) -> DashboardStats:

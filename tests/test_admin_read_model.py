@@ -168,6 +168,27 @@ def test_project_context_returns_local_curated_context(db: JournalDB) -> None:
     assert context.related_projects == ()
 
 
+def test_project_context_excludes_effectively_closed_open_items(db: JournalDB) -> None:
+    open_item = db.append(
+        JournalEntry(
+            project="elder-berry",
+            status=JournalStatus.IN_ARBEIT,
+            content="work in progress",
+        )
+    )
+    db.append(
+        JournalEntry(
+            project="elder-berry",
+            status=JournalStatus.NOTIZ,
+            content=f"Open-Items-Abgleich\n- #{open_item.id} -> #999",
+        )
+    )
+
+    context = AdminReadModel(db).project_context("elder-berry")
+
+    assert context.open_items == ()
+
+
 def test_search_global_filters_by_status_and_since(db: JournalDB) -> None:
     now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
     db.append(

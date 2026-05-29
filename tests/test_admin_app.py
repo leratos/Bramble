@@ -451,6 +451,30 @@ class TestAdminApp:
         assert "Workflow fuer Eintragsabschluss" in response.text
         assert "Append-only Journal-Eintrag geschrieben" in response.text
 
+    def test_project_view_hides_effectively_closed_open_items(
+        self, admin_client: TestClient, db: JournalDB
+    ) -> None:
+        open_item = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                content="project detail open task",
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.NOTIZ,
+                content=f"Open-Items-Abgleich\n- #{open_item.id} -> #999",
+            )
+        )
+        _login(admin_client)
+
+        response = admin_client.get("/projects/elder-berry")
+
+        assert response.status_code == 200
+        assert "Keine offenen Punkte." in response.text
+
     def test_invalid_project_is_404(self, admin_client: TestClient) -> None:
         _login(admin_client)
 
