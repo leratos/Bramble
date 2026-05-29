@@ -29,7 +29,7 @@ every write the script makes goes into that project.
 
 What it does
 ------------
-1. Connects with the token, lists tools, checks all four are present.
+1. Connects with the token, lists tools, checks all five are present.
 2. Verifies a tokenless request is rejected (auth gate is on).
 3. Appends two journal entries to ``--project``.
 4. Reads them back via ``journal_read``.
@@ -130,6 +130,7 @@ EXPECTED_TOOLS = {
     "journal_read",
     "journal_append",
     "journal_search",
+    "journal_search_all",
     "journal_list_projects",
 }
 
@@ -148,7 +149,7 @@ async def run_smoke(url: str, token: str, project: str) -> int:
         if missing:
             fail(f"missing expected tools: {sorted(missing)}")
             return 1
-        ok("all four expected tools are registered")
+        ok("all five expected tools are registered")
 
         # ------------------------------------------------------------------
         # 2. The auth gate rejects a tokenless request
@@ -238,7 +239,30 @@ async def run_smoke(url: str, token: str, project: str) -> int:
         ok("FTS5 search found exactly the beta entry")
 
         # ------------------------------------------------------------------
-        # 6. Write-scope binding: a foreign project is refused
+        # 6. Cross-project search with filters
+        # ------------------------------------------------------------------
+        section(f"journal_search_all for {needle!r}")
+        result = await client.call_tool(
+            "journal_search_all",
+            {
+                "query": needle,
+                "limit": 5,
+                "projects": [project],
+                "statuses": ["bugfix"],
+            },
+        )
+        hits = unwrap(result)
+        print(f"  {len(hits)} hit(s)")
+        if len(hits) != 1 or hits[0]["id"] != beta["id"]:
+            fail(
+                f"expected exactly one global hit (id={beta['id']}); "
+                f"got {[h['id'] for h in hits]}"
+            )
+            return 1
+        ok("cross-project search found the beta entry with filters")
+
+        # ------------------------------------------------------------------
+        # 7. Write-scope binding: a foreign project is refused
         # ------------------------------------------------------------------
         section(f"write-scope check (append into {FOREIGN_PROJECT!r})")
         try:
@@ -260,7 +284,7 @@ async def run_smoke(url: str, token: str, project: str) -> int:
             return 1
 
         # ------------------------------------------------------------------
-        # 7. Overview after writes
+        # 8. Overview after writes
         # ------------------------------------------------------------------
         section("journal_list_projects (after writes)")
         result = await client.call_tool("journal_list_projects", {})
@@ -276,7 +300,7 @@ async def run_smoke(url: str, token: str, project: str) -> int:
         ok(f"{project!r} appears in the overview")
 
         # ------------------------------------------------------------------
-        # 8. Negative: unknown status
+        # 9. Negative: unknown status
         # ------------------------------------------------------------------
         section("negative test: unknown status")
         try:
@@ -294,7 +318,7 @@ async def run_smoke(url: str, token: str, project: str) -> int:
             return 1
 
         # ------------------------------------------------------------------
-        # 9. Negative: non-kebab project name
+        # 10. Negative: non-kebab project name
         # ------------------------------------------------------------------
         section("negative test: non-kebab project name")
         try:

@@ -25,18 +25,21 @@ defensive additions:
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from bramble.journal_entry import JournalEntry, JournalEntryLink
+from bramble.journal_entry import JournalEntry, JournalEntryLink, JournalStatus
 from bramble.project_summary import ProjectSummary
 
 logger = logging.getLogger(__name__)
 
 _PROJECT_STATUSES = {"active", "paused", "archived"}
+_SEARCH_ALL_LIMIT_MAX = 100
+_TAG_FILTER_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
 # ---------------------------------------------------------------------------
@@ -393,6 +396,75 @@ class JournalDB:
             )
             return []
 
+    def search_all(
+        self,
+        query: str,
+        limit: int = 20,
+        *,
+        projects: object = None,
+        statuses: object = None,
+        tags: object = None,
+    ) -> list[JournalEntry]:
+        """Full-text-search entries across projects.
+
+        Optional filters narrow the result set by project, status and
+        tags. Multiple tags use AND semantics: every requested tag must
+        be present on a hit. Malformed FTS5 syntax returns an empty
+        result list, matching :meth:`search`.
+        """
+
+        self._validate_search_all_limit_arg(limit)
+        if not isinstance(query, str):
+            raise TypeError("query must be a string")
+        if not query.strip():
+            raise ValueError("query must not be empty")
+
+        project_filter = _normalise_text_filter_values(projects, name="projects")
+        status_filter = _normalise_status_filter_values(statuses)
+        tag_filter = _normalise_tag_filter_values(tags)
+
+        where = ["journal_fts MATCH ?"]
+        params: list[object] = [query]
+        if project_filter:
+            placeholders = ",".join("?" for _ in project_filter)
+            where.append(f"je.project IN ({placeholders})")
+            params.extend(project_filter)
+        if status_filter:
+            placeholders = ",".join("?" for _ in status_filter)
+            where.append(f"je.status IN ({placeholders})")
+            params.extend(status_filter)
+        for index, tag in enumerate(tag_filter):
+            where.append(
+                "EXISTS ("
+                f"SELECT 1 FROM journal_entry_tags jet{index} "
+                f"WHERE jet{index}.entry_id = je.id AND jet{index}.tag = ?"
+                ")"
+            )
+            params.append(tag)
+
+        sql = (
+            "SELECT je.id, je.project, je.timestamp, je.status, "
+            "       je.phase, je.title, je.content, "
+            "       je.actor, je.client, je.source "
+            "FROM journal_fts "
+            "JOIN journal_entries je ON je.id = journal_fts.rowid "
+            f"WHERE {' AND '.join(where)} "
+            "ORDER BY je.timestamp DESC, je.id DESC "
+            "LIMIT ?"
+        )
+        params.append(limit)
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(sql, params).fetchall()
+                return self._rows_to_entries(conn, rows)
+        except sqlite3.OperationalError as exc:
+            logger.warning(
+                "FTS5 search_all failed for query=%r: %s",
+                query,
+                exc,
+            )
+            return []
+
     def project_overview(self) -> list[ProjectSummary]:
         """Return one :class:`ProjectSummary` per project, newest activity first.
 
@@ -512,6 +584,12 @@ class JournalDB:
             raise TypeError(f"{name} must be an int")
         if value <= 0:
             raise ValueError(f"{name} must be positive")
+
+    @staticmethod
+    def _validate_search_all_limit_arg(value: object) -> None:
+        JournalDB._validate_limit_arg(value, name="limit")
+        if value > _SEARCH_ALL_LIMIT_MAX:
+            raise ValueError(f"limit must be at most {_SEARCH_ALL_LIMIT_MAX}")
 
 
 def _migrate_projects_from_entries(conn: sqlite3.Connection) -> None:
@@ -702,3 +780,77 @@ def _normalise_optional_text(value: str | None, name: str) -> str | None:
         raise TypeError(f"{name} must be a string or None")
     value = value.strip()
     return value or None
+
+
+def _normalise_text_filter_values(values: object, *, name: str) -> tuple[str, ...]:
+    if values is None:
+        return ()
+    if isinstance(values, (str, bytes)):
+        raise TypeError(f"{name} must be an iterable of strings, not a string")
+    try:
+        iterator = iter(values)  # type: ignore[arg-type]
+    except TypeError as exc:
+        raise TypeError(f"{name} must be an iterable of strings") from exc
+
+    normalised: set[str] = set()
+    for value in iterator:
+        if not isinstance(value, str):
+            raise TypeError(f"{name} must contain only strings")
+        value = value.strip()
+        if not value:
+            raise ValueError(f"{name} must not contain empty values")
+        normalised.add(value)
+    return tuple(sorted(normalised))
+
+
+def _normalise_status_filter_values(values: object) -> tuple[str, ...]:
+    if values is None:
+        return ()
+    if isinstance(values, (str, bytes)):
+        raise TypeError("statuses must be an iterable of strings, not a string")
+    try:
+        iterator = iter(values)  # type: ignore[arg-type]
+    except TypeError as exc:
+        raise TypeError("statuses must be an iterable of strings") from exc
+
+    normalised: set[str] = set()
+    for value in iterator:
+        if isinstance(value, JournalStatus):
+            normalised.add(value.value)
+            continue
+        if not isinstance(value, str):
+            raise TypeError("statuses must contain only strings or JournalStatus")
+        try:
+            normalised.add(JournalStatus(value.strip()).value)
+        except ValueError as exc:
+            allowed = ", ".join(status.value for status in JournalStatus)
+            raise ValueError(
+                f"status {value!r} is not allowed; must be one of: {allowed}"
+            ) from exc
+    return tuple(sorted(normalised))
+
+
+def _normalise_tag_filter_values(values: object) -> tuple[str, ...]:
+    if values is None:
+        return ()
+    if isinstance(values, (str, bytes)):
+        raise TypeError("tags must be an iterable of strings, not a string")
+    try:
+        iterator = iter(values)  # type: ignore[arg-type]
+    except TypeError as exc:
+        raise TypeError("tags must be an iterable of strings") from exc
+
+    normalised: set[str] = set()
+    for value in iterator:
+        if not isinstance(value, str):
+            raise TypeError("tags must contain only strings")
+        tag = value.strip().lower()
+        if not tag:
+            raise ValueError("tags must not contain empty values")
+        if not _TAG_FILTER_RE.fullmatch(tag):
+            raise ValueError(
+                f"tag {tag!r} must match kebab-case pattern "
+                "^[a-z0-9][a-z0-9-]*$"
+            )
+        normalised.add(tag)
+    return tuple(sorted(normalised))

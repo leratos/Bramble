@@ -78,6 +78,15 @@ def _require_kebab_case(project: str) -> None:
         )
 
 
+def _require_kebab_case_filters(projects: list[str] | None) -> None:
+    if projects is None:
+        return
+    if isinstance(projects, (str, bytes)):
+        raise TypeError("projects must be an iterable of project strings")
+    for project in projects:
+        _require_kebab_case(project)
+
+
 def _entry_to_dict(entry: JournalEntry) -> dict[str, Any]:
     """Serialise a :class:`JournalEntry` to a plain MCP-friendly dict."""
 
@@ -273,8 +282,9 @@ class JournalMCPServer:
             instructions=(
                 "Shared development journal across projects. "
                 "Use journal_append to record new entries, journal_read "
-                "to fetch recent entries, journal_search for full-text "
-                "search, and journal_list_projects for an overview."
+                "to fetch recent entries, journal_search or "
+                "journal_search_all for full-text search, and "
+                "journal_list_projects for an overview."
             ),
         )
         self._register_tools()
@@ -308,7 +318,7 @@ class JournalMCPServer:
     def _register_tools(self) -> None:
         """Register all MCP tools on :attr:`app`.
 
-        All four tools live in this single method on purpose: the
+        All tools live in this single method on purpose: the
         ``self`` closure means each tool implicitly carries the
         :class:`JournalDB` it talks to, and keeping the registrations
         together makes the public surface of the server obvious at a
@@ -399,6 +409,34 @@ class JournalMCPServer:
 
             _require_kebab_case(project)
             entries = await asyncio.to_thread(db.search, project, query, limit)
+            return [_entry_to_dict(e) for e in entries]
+
+        @app.tool
+        @translate_errors
+        async def journal_search_all(
+            query: str,
+            limit: int = 20,
+            projects: list[str] | None = None,
+            statuses: list[str] | None = None,
+            tags: list[str] | None = None,
+        ) -> list[dict[str, Any]]:
+            """Full-text-search journal entries across projects.
+
+            Pass SQLite FTS5 MATCH syntax directly. Optional filters
+            narrow results by ``projects``, ``statuses`` and ``tags``;
+            multiple tags use AND semantics. At most 100 results can be
+            requested. Malformed FTS5 syntax returns an empty list.
+            """
+
+            _require_kebab_case_filters(projects)
+            entries = await asyncio.to_thread(
+                db.search_all,
+                query,
+                limit,
+                projects=projects,
+                statuses=statuses,
+                tags=tags,
+            )
             return [_entry_to_dict(e) for e in entries]
 
         @app.tool
