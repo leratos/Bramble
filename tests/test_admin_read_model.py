@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 from bramble.admin_read_model import AdminReadModel
 from bramble.journal_db import JournalDB
-from bramble.journal_entry import JournalEntry, JournalStatus
+from bramble.journal_entry import JournalEntry, JournalEntryLink, JournalStatus
 
 
 def test_dashboard_stats_count_recent_windows(db: JournalDB) -> None:
@@ -69,3 +69,30 @@ def test_dashboard_project_count_uses_registry(db: JournalDB) -> None:
 
     assert stats.project_count == 1
     assert stats.total_entries == 0
+
+
+def test_admin_read_model_loads_links_and_backlinks(db: JournalDB) -> None:
+    original = db.append(
+        JournalEntry(
+            project="bramble",
+            status=JournalStatus.NOTIZ,
+            content="original",
+        )
+    )
+    followup = db.append(
+        JournalEntry(
+            project="bramble",
+            status=JournalStatus.BUGFIX,
+            content="follow-up",
+            links=[{"to_entry_id": original.id, "relation": "corrects"}],
+        )
+    )
+
+    entries = {entry.id: entry for entry in AdminReadModel(db).project_entries("bramble")}
+
+    assert entries[followup.id].links == (
+        JournalEntryLink(entry_id=original.id, relation="corrects"),
+    )
+    assert entries[original.id].backlinks == (
+        JournalEntryLink(entry_id=followup.id, relation="corrects"),
+    )

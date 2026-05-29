@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from bramble.journal_db import JournalDB
-from bramble.journal_entry import JournalEntry, JournalStatus
+from bramble.journal_entry import JournalEntry, JournalEntryLink, JournalStatus
 from bramble.project_summary import ProjectSummary
 
 
@@ -152,6 +152,26 @@ class TestJournalDBInit:
         assert entry.actor is None
         assert entry.client is None
         assert entry.source is None
+
+    def test_initialize_creates_tag_tables(self, db: JournalDB) -> None:
+        with sqlite3.connect(db.db_path) as conn:
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+        assert {"journal_tags", "journal_entry_tags"} <= tables
+
+    def test_initialize_creates_link_table(self, db: JournalDB) -> None:
+        with sqlite3.connect(db.db_path) as conn:
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+        assert "journal_entry_links" in tables
 
 
 # ---------------------------------------------------------------------------
@@ -422,3 +442,64 @@ class TestRoundTrip:
         assert restored.actor == "codex"
         assert restored.client == "codex-desktop"
         assert restored.source == "mcp"
+
+    def test_tags_survive_round_trip(self, db: JournalDB) -> None:
+        original = JournalEntry(
+            project="bramble",
+            status=JournalStatus.NOTIZ,
+            content="tagged payload",
+            tags=["test", "admin-ui", "test"],
+        )
+        persisted = db.append(original)
+
+        [restored] = db.read("bramble")
+        hits = db.search("bramble", "tagged")
+
+        assert restored.id == persisted.id
+        assert restored.tags == ("admin-ui", "test")
+        assert hits[0].tags == ("admin-ui", "test")
+        with sqlite3.connect(db.db_path) as conn:
+            stored_tags = {
+                row[0]
+                for row in conn.execute("SELECT name FROM journal_tags")
+            }
+        assert stored_tags == {"admin-ui", "test"}
+
+    def test_links_create_outgoing_and_incoming_views(self, db: JournalDB) -> None:
+        original = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="old context",
+            )
+        )
+        followup = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.BUGFIX,
+                content="corrected context",
+                links=[{"to_entry_id": original.id, "relation": "corrects"}],
+            )
+        )
+
+        entries = {entry.id: entry for entry in db.read("bramble")}
+
+        assert entries[followup.id].links == (
+            JournalEntryLink(entry_id=original.id, relation="corrects"),
+        )
+        assert entries[original.id].backlinks == (
+            JournalEntryLink(entry_id=followup.id, relation="corrects"),
+        )
+
+    def test_link_target_must_exist_and_insert_rolls_back(self, db: JournalDB) -> None:
+        with pytest.raises(ValueError, match="does not exist"):
+            db.append(
+                JournalEntry(
+                    project="bramble",
+                    status=JournalStatus.BUGFIX,
+                    content="broken link",
+                    links=[{"to_entry_id": 999, "relation": "corrects"}],
+                )
+            )
+
+        assert db.read("bramble") == []

@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
-from bramble.journal_entry import JournalEntry, JournalStatus
+from bramble.journal_entry import JournalEntry, JournalEntryLink, JournalStatus
 
 
 # ---------------------------------------------------------------------------
@@ -40,6 +40,9 @@ class TestJournalEntryConstruction:
             actor="codex",
             client="codex-desktop",
             source="mcp",
+            tags=["test", "Admin-UI", "test"],
+            links=[{"to_entry_id": 12, "relation": "corrects"}],
+            backlinks=[{"from_entry_id": 15, "relation": "adds_context_to"}],
             timestamp=ts,
         )
 
@@ -49,6 +52,11 @@ class TestJournalEntryConstruction:
         assert entry.actor == "codex"
         assert entry.client == "codex-desktop"
         assert entry.source == "mcp"
+        assert entry.tags == ("admin-ui", "test")
+        assert entry.links == (JournalEntryLink(entry_id=12, relation="corrects"),)
+        assert entry.backlinks == (
+            JournalEntryLink(entry_id=15, relation="adds_context_to"),
+        )
         assert entry.timestamp == ts
         assert entry.timestamp_iso() == "2026-05-12T08:30:00+00:00"
 
@@ -177,6 +185,42 @@ class TestJournalEntryValidation:
         assert entry.client is None
         assert entry.source is None
 
+    def test_rejects_invalid_tags(self) -> None:
+        with pytest.raises(ValueError, match="kebab-case"):
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="x",
+                tags=["bad_tag"],
+            )
+
+    def test_rejects_more_than_five_tags(self) -> None:
+        with pytest.raises(ValueError, match="at most 5"):
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="x",
+                tags=["one", "two", "three", "four", "five", "six"],
+            )
+
+    def test_rejects_invalid_link_relation(self) -> None:
+        with pytest.raises(ValueError, match="relation"):
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="x",
+                links=[{"to_entry_id": 1, "relation": "edits"}],
+            )
+
+    def test_rejects_non_positive_link_entry_id(self) -> None:
+        with pytest.raises(ValueError, match="positive"):
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="x",
+                links=[{"to_entry_id": 0, "relation": "corrects"}],
+            )
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -216,12 +260,18 @@ class TestJournalEntryHelpers:
             actor="codex",
             client="codex-desktop",
             source="mcp",
+            tags=("admin-ui", "test"),
+            links=(JournalEntryLink(entry_id=3, relation="corrects"),),
+            backlinks=(JournalEntryLink(entry_id=4, relation="relates_to"),),
         )
         assert entry.id == 1
         assert entry.status is JournalStatus.NOTIZ
         assert entry.actor == "codex"
         assert entry.client == "codex-desktop"
         assert entry.source == "mcp"
+        assert entry.tags == ("admin-ui", "test")
+        assert entry.links == (JournalEntryLink(entry_id=3, relation="corrects"),)
+        assert entry.backlinks == (JournalEntryLink(entry_id=4, relation="relates_to"),)
         assert entry.timestamp == datetime(2026, 5, 12, 8, 30, tzinfo=UTC)
 
     def test_from_row_assumes_utc_for_naive_legacy_rows(self) -> None:

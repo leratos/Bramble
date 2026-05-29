@@ -31,7 +31,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from bramble.journal_entry import JournalEntry
+from bramble.journal_entry import JournalEntry, JournalEntryLink
 from bramble.project_summary import ProjectSummary
 
 logger = logging.getLogger(__name__)
@@ -69,6 +69,40 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
         client    TEXT,
         source    TEXT
     )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS journal_tags (
+        name        TEXT PRIMARY KEY,
+        created_at  TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS journal_entry_tags (
+        entry_id  INTEGER NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+        tag       TEXT NOT NULL REFERENCES journal_tags(name),
+        PRIMARY KEY (entry_id, tag)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS journal_entry_links (
+        from_entry_id  INTEGER NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+        to_entry_id    INTEGER NOT NULL REFERENCES journal_entries(id),
+        relation       TEXT NOT NULL CHECK (
+            relation IN (
+                'corrects',
+                'adds_context_to',
+                'supersedes',
+                'implements',
+                'relates_to'
+            )
+        ),
+        created_at     TEXT NOT NULL,
+        PRIMARY KEY (from_entry_id, to_entry_id, relation)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_entry_links_to
+        ON journal_entry_links(to_entry_id)
     """,
     """
     CREATE INDEX IF NOT EXISTS idx_project_ts
@@ -206,13 +240,14 @@ class JournalDB:
         with self._connect() as conn:
             _upsert_project_for_entry(conn, entry.project, entry.timestamp_iso())
             cursor = conn.execute(sql, params)
-            conn.commit()
             new_id = cursor.lastrowid
-
-        if new_id is None or new_id <= 0:
-            # This should not happen with AUTOINCREMENT, but be loud
-            # if SQLite ever surprises us.
-            raise RuntimeError("sqlite did not return a lastrowid")
+            if new_id is None or new_id <= 0:
+                # This should not happen with AUTOINCREMENT, but be loud
+                # if SQLite ever surprises us.
+                raise RuntimeError("sqlite did not return a lastrowid")
+            _insert_entry_tags(conn, new_id, entry.tags, entry.timestamp_iso())
+            _insert_entry_links(conn, new_id, entry.links, entry.timestamp_iso())
+            conn.commit()
 
         return entry.with_id(new_id)
 
@@ -309,7 +344,7 @@ class JournalDB:
         )
         with self._connect() as conn:
             rows = conn.execute(sql, (project, n)).fetchall()
-        return [self._row_to_entry(row) for row in rows]
+            return self._rows_to_entries(conn, rows)
 
     def search(
         self,
@@ -347,6 +382,7 @@ class JournalDB:
         try:
             with self._connect() as conn:
                 rows = conn.execute(sql, (query, project, limit)).fetchall()
+                return self._rows_to_entries(conn, rows)
         except sqlite3.OperationalError as exc:
             # Bad FTS5 syntax from the caller. Don't crash the server.
             logger.warning(
@@ -356,7 +392,6 @@ class JournalDB:
                 exc,
             )
             return []
-        return [self._row_to_entry(row) for row in rows]
 
     def project_overview(self) -> list[ProjectSummary]:
         """Return one :class:`ProjectSummary` per project, newest activity first.
@@ -421,7 +456,32 @@ class JournalDB:
             conn.close()
 
     @staticmethod
-    def _row_to_entry(row: sqlite3.Row) -> JournalEntry:
+    def _rows_to_entries(
+        conn: sqlite3.Connection,
+        rows: list[sqlite3.Row],
+    ) -> list[JournalEntry]:
+        entry_ids = [row["id"] for row in rows]
+        tags_by_entry_id = _tags_by_entry_id(conn, entry_ids)
+        links_by_entry_id = _outgoing_links_by_entry_id(conn, entry_ids)
+        backlinks_by_entry_id = _incoming_links_by_entry_id(conn, entry_ids)
+        return [
+            JournalDB._row_to_entry(
+                row,
+                tags=tags_by_entry_id.get(row["id"], ()),
+                links=links_by_entry_id.get(row["id"], ()),
+                backlinks=backlinks_by_entry_id.get(row["id"], ()),
+            )
+            for row in rows
+        ]
+
+    @staticmethod
+    def _row_to_entry(
+        row: sqlite3.Row,
+        *,
+        tags: tuple[str, ...] = (),
+        links: tuple[JournalEntryLink, ...] = (),
+        backlinks: tuple[JournalEntryLink, ...] = (),
+    ) -> JournalEntry:
         return JournalEntry.from_row(
             id=row["id"],
             project=row["project"],
@@ -433,6 +493,9 @@ class JournalDB:
             actor=row["actor"],
             client=row["client"],
             source=row["source"],
+            tags=tags,
+            links=links,
+            backlinks=backlinks,
         )
 
     @staticmethod
@@ -470,6 +533,132 @@ def _migrate_journal_entry_metadata_columns(conn: sqlite3.Connection) -> None:
     for column in ("actor", "client", "source"):
         if column not in columns:
             conn.execute(f"ALTER TABLE journal_entries ADD COLUMN {column} TEXT")
+
+
+def _insert_entry_tags(
+    conn: sqlite3.Connection,
+    entry_id: int,
+    tags: tuple[str, ...],
+    timestamp: str,
+) -> None:
+    if not tags:
+        return
+    conn.executemany(
+        "INSERT OR IGNORE INTO journal_tags (name, created_at) VALUES (?, ?)",
+        [(tag, timestamp) for tag in tags],
+    )
+    conn.executemany(
+        "INSERT INTO journal_entry_tags (entry_id, tag) VALUES (?, ?)",
+        [(entry_id, tag) for tag in tags],
+    )
+
+
+def _insert_entry_links(
+    conn: sqlite3.Connection,
+    entry_id: int,
+    links: tuple[JournalEntryLink, ...],
+    timestamp: str,
+) -> None:
+    if not links:
+        return
+    if any(link.entry_id == entry_id for link in links):
+        raise ValueError("journal entry cannot link to itself")
+
+    target_ids = sorted({link.entry_id for link in links})
+    placeholders = ",".join("?" for _ in target_ids)
+    existing_ids = {
+        row["id"]
+        for row in conn.execute(
+            f"SELECT id FROM journal_entries WHERE id IN ({placeholders})",
+            target_ids,
+        ).fetchall()
+    }
+    missing_ids = [target_id for target_id in target_ids if target_id not in existing_ids]
+    if missing_ids:
+        missing = ", ".join(str(target_id) for target_id in missing_ids)
+        raise ValueError(f"link target entry id does not exist: {missing}")
+
+    conn.executemany(
+        """
+        INSERT INTO journal_entry_links
+            (from_entry_id, to_entry_id, relation, created_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        [
+            (entry_id, link.entry_id, link.relation.value, timestamp)
+            for link in links
+        ],
+    )
+
+
+def _tags_by_entry_id(
+    conn: sqlite3.Connection,
+    entry_ids: list[int],
+) -> dict[int, tuple[str, ...]]:
+    if not entry_ids:
+        return {}
+    placeholders = ",".join("?" for _ in entry_ids)
+    rows = conn.execute(
+        f"""
+        SELECT entry_id, tag
+        FROM journal_entry_tags
+        WHERE entry_id IN ({placeholders})
+        ORDER BY tag ASC
+        """,
+        entry_ids,
+    ).fetchall()
+    tag_map: dict[int, list[str]] = {}
+    for row in rows:
+        tag_map.setdefault(row["entry_id"], []).append(row["tag"])
+    return {entry_id: tuple(tags) for entry_id, tags in tag_map.items()}
+
+
+def _outgoing_links_by_entry_id(
+    conn: sqlite3.Connection,
+    entry_ids: list[int],
+) -> dict[int, tuple[JournalEntryLink, ...]]:
+    if not entry_ids:
+        return {}
+    placeholders = ",".join("?" for _ in entry_ids)
+    rows = conn.execute(
+        f"""
+        SELECT from_entry_id, to_entry_id, relation
+        FROM journal_entry_links
+        WHERE from_entry_id IN ({placeholders})
+        ORDER BY relation ASC, to_entry_id ASC
+        """,
+        entry_ids,
+    ).fetchall()
+    link_map: dict[int, list[JournalEntryLink]] = {}
+    for row in rows:
+        link_map.setdefault(row["from_entry_id"], []).append(
+            JournalEntryLink(entry_id=row["to_entry_id"], relation=row["relation"])
+        )
+    return {entry_id: tuple(links) for entry_id, links in link_map.items()}
+
+
+def _incoming_links_by_entry_id(
+    conn: sqlite3.Connection,
+    entry_ids: list[int],
+) -> dict[int, tuple[JournalEntryLink, ...]]:
+    if not entry_ids:
+        return {}
+    placeholders = ",".join("?" for _ in entry_ids)
+    rows = conn.execute(
+        f"""
+        SELECT to_entry_id, from_entry_id, relation
+        FROM journal_entry_links
+        WHERE to_entry_id IN ({placeholders})
+        ORDER BY relation ASC, from_entry_id ASC
+        """,
+        entry_ids,
+    ).fetchall()
+    link_map: dict[int, list[JournalEntryLink]] = {}
+    for row in rows:
+        link_map.setdefault(row["to_entry_id"], []).append(
+            JournalEntryLink(entry_id=row["from_entry_id"], relation=row["relation"])
+        )
+    return {entry_id: tuple(links) for entry_id, links in link_map.items()}
 
 
 def _upsert_project_for_entry(

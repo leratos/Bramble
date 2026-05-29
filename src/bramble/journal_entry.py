@@ -23,9 +23,15 @@ Design notes (Phase 1, see ``docs/journal.txt``):
 
 from __future__ import annotations
 
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
+
+_TAG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+_MAX_TAGS = 5
 
 
 class JournalStatus(StrEnum):
@@ -35,6 +41,44 @@ class JournalStatus(StrEnum):
     ABGESCHLOSSEN = "abgeschlossen"
     NOTIZ = "notiz"
     BUGFIX = "bugfix"
+
+
+class JournalLinkRelation(StrEnum):
+    """Allowed semantic relations between journal entries."""
+
+    CORRECTS = "corrects"
+    ADDS_CONTEXT_TO = "adds_context_to"
+    SUPERSEDES = "supersedes"
+    IMPLEMENTS = "implements"
+    RELATES_TO = "relates_to"
+
+
+@dataclass(frozen=True, slots=True)
+class JournalEntryLink:
+    """A typed relation from one journal entry to another."""
+
+    entry_id: int
+    relation: JournalLinkRelation
+
+    def __post_init__(self) -> None:
+        if isinstance(self.entry_id, bool) or not isinstance(self.entry_id, int):
+            raise TypeError("link entry_id must be an int")
+        if self.entry_id <= 0:
+            raise ValueError("link entry_id must be positive")
+        if isinstance(self.relation, JournalLinkRelation):
+            return
+        if isinstance(self.relation, str):
+            try:
+                normalised = JournalLinkRelation(self.relation)
+            except ValueError as exc:
+                allowed = ", ".join(r.value for r in JournalLinkRelation)
+                raise ValueError(
+                    f"link relation {self.relation!r} is not allowed; "
+                    f"must be one of: {allowed}"
+                ) from exc
+            object.__setattr__(self, "relation", normalised)
+            return
+        raise TypeError("link relation must be a JournalLinkRelation or string")
 
 
 def _utc_now() -> datetime:
@@ -70,6 +114,14 @@ class JournalEntry:
     source:
         Optional broad origin such as ``"mcp"``, ``"admin-ui"``, or
         ``"import"``. This is metadata only, not an auth source.
+    tags:
+        Optional lowercase kebab-case labels. Duplicates are removed
+        and at most five tags are allowed.
+    links:
+        Optional outgoing links to existing journal entries.
+    backlinks:
+        Optional incoming links from other entries. These are a
+        read-side view derived from persisted links.
     timestamp:
         Timezone-aware ``datetime`` in UTC. Defaults to "now".
     id:
@@ -84,6 +136,9 @@ class JournalEntry:
     actor: str | None = None
     client: str | None = None
     source: str | None = None
+    tags: tuple[str, ...] = field(default_factory=tuple)
+    links: tuple[JournalEntryLink, ...] = field(default_factory=tuple)
+    backlinks: tuple[JournalEntryLink, ...] = field(default_factory=tuple)
     timestamp: datetime = field(default_factory=_utc_now)
     id: int | None = None
 
@@ -98,6 +153,9 @@ class JournalEntry:
         self._validate_optional_text("actor")
         self._validate_optional_text("client")
         self._validate_optional_text("source")
+        self._validate_tags()
+        self._validate_links("links", id_keys=("to_entry_id", "entry_id"))
+        self._validate_links("backlinks", id_keys=("from_entry_id", "entry_id"))
         self._validate_timestamp()
 
     # ------------------------------------------------------------------
@@ -154,6 +212,58 @@ class JournalEntry:
         if stripped != value:
             object.__setattr__(self, attr, stripped)
 
+    def _validate_tags(self) -> None:
+        if self.tags is None:
+            object.__setattr__(self, "tags", ())
+            return
+        if isinstance(self.tags, (str, bytes)):
+            raise TypeError("tags must be an iterable of strings, not a string")
+
+        try:
+            iterator = iter(self.tags)
+        except TypeError as exc:
+            raise TypeError("tags must be an iterable of strings") from exc
+
+        normalised: set[str] = set()
+        for tag in iterator:
+            if not isinstance(tag, str):
+                raise TypeError("tags must contain only strings")
+            tag = tag.strip().lower()
+            if not tag:
+                raise ValueError("tags must not contain empty values")
+            if not _TAG_RE.fullmatch(tag):
+                raise ValueError(
+                    f"tag {tag!r} must match kebab-case pattern "
+                    "^[a-z0-9][a-z0-9-]*$"
+                )
+            normalised.add(tag)
+
+        if len(normalised) > _MAX_TAGS:
+            raise ValueError(f"entries may have at most {_MAX_TAGS} tags")
+        object.__setattr__(self, "tags", tuple(sorted(normalised)))
+
+    def _validate_links(self, attr: str, *, id_keys: tuple[str, ...]) -> None:
+        value = getattr(self, attr)
+        if value is None:
+            object.__setattr__(self, attr, ())
+            return
+        if isinstance(value, (str, bytes)):
+            raise TypeError(f"{attr} must be an iterable of links, not a string")
+
+        try:
+            iterator = iter(value)
+        except TypeError as exc:
+            raise TypeError(f"{attr} must be an iterable of links") from exc
+
+        normalised: set[JournalEntryLink] = set()
+        for raw_link in iterator:
+            normalised.add(_coerce_link(raw_link, attr=attr, id_keys=id_keys))
+        object.__setattr__(
+            self,
+            attr,
+            tuple(sorted(normalised, key=lambda link: (link.relation.value, link.entry_id))),
+        )
+
     def _validate_timestamp(self) -> None:
         if not isinstance(self.timestamp, datetime):
             raise TypeError("timestamp must be a datetime")
@@ -194,6 +304,9 @@ class JournalEntry:
             actor=self.actor,
             client=self.client,
             source=self.source,
+            tags=self.tags,
+            links=self.links,
+            backlinks=self.backlinks,
             timestamp=self.timestamp,
             id=new_id,
         )
@@ -212,6 +325,9 @@ class JournalEntry:
         actor: str | None = None,
         client: str | None = None,
         source: str | None = None,
+        tags: tuple[str, ...] = (),
+        links: tuple[JournalEntryLink, ...] = (),
+        backlinks: tuple[JournalEntryLink, ...] = (),
     ) -> JournalEntry:
         """Build an entry from a DB row.
 
@@ -232,6 +348,39 @@ class JournalEntry:
             actor=actor,
             client=client,
             source=source,
+            tags=tags,
+            links=links,
+            backlinks=backlinks,
             timestamp=ts,
             id=id,
         )
+
+
+def _coerce_link(
+    raw_link: object,
+    *,
+    attr: str,
+    id_keys: tuple[str, ...],
+) -> JournalEntryLink:
+    if isinstance(raw_link, JournalEntryLink):
+        return raw_link
+    if isinstance(raw_link, Mapping):
+        entry_id = _first_mapping_value(raw_link, id_keys)
+        if entry_id is _MISSING:
+            keys = ", ".join(id_keys)
+            raise ValueError(f"{attr} must include one of these id keys: {keys}")
+        relation = raw_link.get("relation")
+        if relation is None:
+            raise ValueError(f"{attr} must include a relation")
+        return JournalEntryLink(entry_id=entry_id, relation=relation)
+    raise TypeError(f"{attr} must contain JournalEntryLink values or mappings")
+
+
+_MISSING = object()
+
+
+def _first_mapping_value(mapping: Mapping[str, Any], keys: tuple[str, ...]) -> object:
+    for key in keys:
+        if key in mapping:
+            return mapping[key]
+    return _MISSING

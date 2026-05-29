@@ -144,6 +144,9 @@ class TestEntryToDict:
             "actor": None,
             "client": None,
             "source": None,
+            "tags": [],
+            "links": [],
+            "backlinks": [],
         }
 
 
@@ -198,6 +201,9 @@ class TestJournalRead:
                 "actor",
                 "client",
                 "source",
+                "tags",
+                "links",
+                "backlinks",
             }
 
     async def test_respects_n_argument(
@@ -268,6 +274,9 @@ class TestJournalAppend:
         assert result.data["actor"] is None
         assert result.data["client"] is None
         assert result.data["source"] == "mcp"
+        assert result.data["tags"] == []
+        assert result.data["links"] == []
+        assert result.data["backlinks"] == []
 
     async def test_optional_fields_are_persisted(
         self, server: JournalMCPServer, db: JournalDB
@@ -311,6 +320,80 @@ class TestJournalAppend:
         assert result.data["actor"] == "codex"
         assert result.data["client"] == "codex-desktop"
         assert result.data["source"] == "agent"
+
+    async def test_tags_are_persisted(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_append",
+                {
+                    "project": "bramble",
+                    "status": "notiz",
+                    "content": "tagged",
+                    "tags": ["test", "Admin-UI", "test"],
+                },
+            )
+
+        [stored] = db.read("bramble")
+        assert stored.tags == ("admin-ui", "test")
+        assert result.data["tags"] == ["admin-ui", "test"]
+
+    async def test_rejects_invalid_tags(self, server: JournalMCPServer) -> None:
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="kebab-case"):
+                await client.call_tool(
+                    "journal_append",
+                    {
+                        "project": "bramble",
+                        "status": "notiz",
+                        "content": "bad tag",
+                        "tags": ["bad_tag"],
+                    },
+                )
+
+    async def test_links_are_persisted(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        old = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="old",
+            )
+        )
+
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_append",
+                {
+                    "project": "bramble",
+                    "status": "bugfix",
+                    "content": "fix",
+                    "links": [{"to_entry_id": old.id, "relation": "corrects"}],
+                },
+            )
+
+        [new_entry, old_entry] = db.read("bramble")
+        assert new_entry.links[0].entry_id == old.id
+        assert new_entry.links[0].relation == "corrects"
+        assert old_entry.backlinks[0].entry_id == new_entry.id
+        assert result.data["links"] == [
+            {"to_entry_id": old.id, "relation": "corrects"}
+        ]
+
+    async def test_rejects_missing_link_target(self, server: JournalMCPServer) -> None:
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="does not exist"):
+                await client.call_tool(
+                    "journal_append",
+                    {
+                        "project": "bramble",
+                        "status": "bugfix",
+                        "content": "bad link",
+                        "links": [{"to_entry_id": 999, "relation": "corrects"}],
+                    },
+                )
 
     async def test_timestamp_is_server_set(
         self, server: JournalMCPServer

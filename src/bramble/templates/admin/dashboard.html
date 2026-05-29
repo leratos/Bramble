@@ -59,6 +59,27 @@
               {% if entry.source %}{% if entry.actor or entry.client %} - {% endif %}{{ entry.source }}{% endif %}
             </p>
           {% endif %}
+          {% if entry.tags %}
+            <div class="chip-list" aria-label="Tags">
+              {% for tag in entry.tags %}
+                <span>{{ tag }}</span>
+              {% endfor %}
+            </div>
+          {% endif %}
+          {% if entry.links %}
+            <div class="chip-list" aria-label="Links">
+              {% for link in entry.links %}
+                <span>{{ link.relation.value }} #{{ link.entry_id }}</span>
+              {% endfor %}
+            </div>
+          {% endif %}
+          {% if entry.backlinks %}
+            <div class="chip-list" aria-label="Backlinks">
+              {% for link in entry.backlinks %}
+                <span>{{ link.relation.value }} from #{{ link.entry_id }}</span>
+              {% endfor %}
+            </div>
+          {% endif %}
           <p class="entry-content">{{ entry.content }}</p>
         </article>
       {% else %}
