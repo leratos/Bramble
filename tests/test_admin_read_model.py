@@ -129,3 +129,38 @@ def test_admin_read_model_loads_links_and_backlinks(db: JournalDB) -> None:
     assert entries[original.id].backlinks == (
         JournalEntryLink(entry_id=followup.id, relation="corrects"),
     )
+
+
+def test_project_context_returns_local_curated_context(db: JournalDB) -> None:
+    now = datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
+    db.append(
+        JournalEntry(
+            project="bramble",
+            status=JournalStatus.IN_ARBEIT,
+            content="open local task",
+            phase="Phase 4d",
+            timestamp=now,
+        )
+    )
+    db.append(
+        JournalEntry(
+            project="bramble",
+            status=JournalStatus.BUGFIX,
+            content="local bugfix",
+            timestamp=now - timedelta(minutes=1),
+        )
+    )
+    db.append(
+        JournalEntry(
+            project="elder-berry",
+            status=JournalStatus.IN_ARBEIT,
+            content="foreign open task",
+            timestamp=now - timedelta(minutes=2),
+        )
+    )
+
+    context = AdminReadModel(db).project_context("bramble", n_recent=5)
+
+    assert [entry.content for entry in context.open_items] == ["open local task"]
+    assert [entry.content for entry in context.recent_bugfixes] == ["local bugfix"]
+    assert context.related_projects == ()

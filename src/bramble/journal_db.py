@@ -140,6 +140,10 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
         ON journal_entries(project, timestamp DESC)
     """,
     """
+    CREATE INDEX IF NOT EXISTS idx_status_ts
+        ON journal_entries(status, timestamp DESC, id DESC)
+    """,
+    """
     CREATE VIRTUAL TABLE IF NOT EXISTS journal_fts
         USING fts5(
             content,

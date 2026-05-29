@@ -231,6 +231,33 @@ class TestAdminApp:
         assert "read-only dashboard entry" in response.text
         assert len(db.read("bramble", n=10)) == before
 
+    def test_project_view_renders_context_panel(
+        self, admin_client: TestClient, db: JournalDB
+    ) -> None:
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                title="Open item",
+                content="project context open task",
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.BUGFIX,
+                content="project context bugfix",
+            )
+        )
+        _login(admin_client)
+
+        response = admin_client.get("/projects/bramble")
+
+        assert response.status_code == 200
+        assert "Offene Punkte" in response.text
+        assert "project context open task" in response.text
+        assert "Letzte Bugfixes" in response.text
+
     def test_invalid_project_is_404(self, admin_client: TestClient) -> None:
         _login(admin_client)
 

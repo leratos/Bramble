@@ -635,6 +635,30 @@ class TestOpenItems:
 
         assert db.open_items(limit=10) == []
 
+    def test_open_items_breaks_timestamp_ties_by_id(self, db: JournalDB) -> None:
+        same_ts = datetime(2026, 5, 29, 12, 0, tzinfo=UTC)
+        first = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content="first",
+                timestamp=same_ts,
+            )
+        )
+        second = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content="second",
+                timestamp=same_ts,
+            )
+        )
+
+        rows = db.open_items(limit=10)
+
+        assert rows[0].id == second.id
+        assert rows[1].id == first.id
+
     def test_open_items_rejects_limit_above_cap(self, db: JournalDB) -> None:
         with pytest.raises(ValueError, match="at most 100"):
             db.open_items(limit=101)

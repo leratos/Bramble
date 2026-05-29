@@ -439,6 +439,7 @@ async def project_detail(request: Request) -> Response:
             entries = ctx.read_model.search_project(project, query=query)
     else:
         entries = ctx.read_model.project_entries(project)
+    project_context = ctx.read_model.project_context(project)
 
     return _render(
         request,
@@ -449,6 +450,7 @@ async def project_detail(request: Request) -> Response:
             "active_project": project,
             "csrf_token": session.csrf_token,
             "summary": summary,
+            "project_context": project_context,
             "entries": entries,
             "query": query,
             "search_error": search_error,

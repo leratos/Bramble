@@ -7,6 +7,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from bramble.journal_context import JournalContext
 from bramble.journal_db import JournalDB
 from bramble.journal_digest import JournalDigest
 from bramble.journal_entry import JournalEntry, JournalEntryLink
@@ -100,6 +101,18 @@ class AdminReadModel:
                 return _rows_to_entries(conn, rows)
         except sqlite3.OperationalError:
             return []
+
+    def project_context(
+        self,
+        project: str,
+        *,
+        n_recent: int = 5,
+    ) -> JournalContext:
+        return self._db.context(
+            project,
+            n_recent=n_recent,
+            include_cross_project=False,
+        )
 
     def dashboard_stats(self, *, now: datetime | None = None) -> DashboardStats:
         if now is None:
