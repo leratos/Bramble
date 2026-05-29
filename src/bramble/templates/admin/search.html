@@ -70,14 +70,19 @@
             <div>
               <a href="{{ url_for('project_detail', project=entry.project) }}">{{ entry.project }}</a>
               {% if entry.title %}<h3>{{ entry.title }}</h3>{% endif %}
-              <p class="entry-status">
-                {{ entry.status.value }}{% if entry.phase %} - {{ entry.phase }}{% endif %}
-              </p>
             </div>
+          </header>
+          <p class="entry-meta">
             <time datetime="{{ entry.timestamp_iso() }}" title="{{ entry.timestamp_iso() }}">
               {{ entry.timestamp|admin_datetime }}
             </time>
-          </header>
+            <span class="entry-meta-separator" aria-hidden="true">·</span>
+            <span class="entry-status-text">{{ entry.status.value }}</span>
+            {% if entry.phase %}
+              <span class="entry-meta-separator" aria-hidden="true">·</span>
+              <span class="entry-status-text">{{ entry.phase }}</span>
+            {% endif %}
+          </p>
           <p class="entry-content">{{ entry.content }}</p>
         </article>
       {% else %}

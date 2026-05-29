@@ -79,12 +79,17 @@
         <article class="entry" id="open-{{ entry.id }}">
           <header>
             <div>{% if entry.title %}<h3>{{ entry.title }}</h3>{% endif %}</div>
+          </header>
+          <p class="entry-meta">
             <time datetime="{{ entry.timestamp_iso() }}" title="{{ entry.timestamp_iso() }}">
               {{ entry.timestamp|admin_datetime }}
             </time>
-          </header>
-          <p class="entry-status">
-            {{ entry.status.value }}{% if entry.phase %} - {{ entry.phase }}{% endif %}
+            <span class="entry-meta-separator" aria-hidden="true">·</span>
+            <span class="entry-status-text">{{ entry.status.value }}</span>
+            {% if entry.phase %}
+              <span class="entry-meta-separator" aria-hidden="true">·</span>
+              <span class="entry-status-text">{{ entry.phase }}</span>
+            {% endif %}
           </p>
           <p class="entry-content">{{ entry.content }}</p>
         </article>
@@ -150,8 +155,12 @@
           <header>
             <div>
               {% if entry.title %}<h3>{{ entry.title }}</h3>{% endif %}
-              <p class="entry-status">
-                {{ entry.status.value }}{% if entry.phase %} - {{ entry.phase }}{% endif %}
+              <p class="entry-meta">
+                <span class="entry-status-text">{{ entry.status.value }}</span>
+                {% if entry.phase %}
+                  <span class="entry-meta-separator" aria-hidden="true">·</span>
+                  <span class="entry-status-text">{{ entry.phase }}</span>
+                {% endif %}
               </p>
               {% if entry.actor or entry.client or entry.source %}
                 <p class="entry-status">
@@ -182,10 +191,18 @@
                 </div>
               {% endif %}
             </div>
+          </header>
+          <p class="entry-meta">
             <time datetime="{{ entry.timestamp_iso() }}" title="{{ entry.timestamp_iso() }}">
               {{ entry.timestamp|admin_datetime }}
             </time>
-          </header>
+            <span class="entry-meta-separator" aria-hidden="true">·</span>
+            <span class="entry-status-text">{{ entry.status.value }}</span>
+            {% if entry.phase %}
+              <span class="entry-meta-separator" aria-hidden="true">·</span>
+              <span class="entry-status-text">{{ entry.phase }}</span>
+            {% endif %}
+          </p>
           <p class="entry-content">{{ entry.content }}</p>
         </article>
       {% else %}
