@@ -783,6 +783,61 @@ class TestOpenItems:
             "open-10",
         ]
 
+    def test_open_items_excludes_entries_closed_by_newer_same_phase_entry(
+        self,
+        db: JournalDB,
+    ) -> None:
+        open_entry = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                phase="phase-95",
+                content="E4 Start: Handler-Gates vorbereiten",
+                timestamp=datetime(2026, 5, 29, 9, 59, tzinfo=UTC),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.ABGESCHLOSSEN,
+                phase="Phase 95",
+                content="Phase 95 ist formal abgeschlossen",
+                timestamp=datetime(2026, 5, 29, 15, 3, tzinfo=UTC),
+            )
+        )
+
+        result = db.open_items(project="elder-berry", limit=10)
+
+        assert result == []
+        assert open_entry.id is not None
+
+    def test_open_items_keeps_entries_open_for_different_phase(
+        self,
+        db: JournalDB,
+    ) -> None:
+        open_entry = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                phase="phase-95",
+                content="open phase 95 task",
+                timestamp=datetime(2026, 5, 29, 10, 0, tzinfo=UTC),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.ABGESCHLOSSEN,
+                phase="phase-96",
+                content="phase 96 abgeschlossen",
+                timestamp=datetime(2026, 5, 29, 15, 0, tzinfo=UTC),
+            )
+        )
+
+        result = db.open_items(project="elder-berry", limit=10)
+
+        assert [entry.id for entry in result] == [open_entry.id]
+
 
 # ---------------------------------------------------------------------------
 # context()

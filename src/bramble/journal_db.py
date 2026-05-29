@@ -1277,7 +1277,65 @@ def _infer_closed_open_item_ids(
         ).fetchall()
         closed_ids.update(int(row["to_entry_id"]) for row in link_rows)
 
+    phase_rows = conn.execute(
+        f"""
+        SELECT id, phase, timestamp
+        FROM journal_entries
+        WHERE project = ?
+          AND id IN ({placeholders})
+        """,
+        [project, *open_item_ids],
+    ).fetchall()
+    open_items_by_phase: dict[str, list[tuple[int, datetime]]] = {}
+    for row in phase_rows:
+        phase_key = _normalise_phase_key(row["phase"])
+        if phase_key is None:
+            continue
+        ts = _parse_optional_timestamp(row["timestamp"])
+        if ts is None:
+            continue
+        open_items_by_phase.setdefault(phase_key, []).append((int(row["id"]), ts))
+
+    if open_items_by_phase:
+        close_rows = conn.execute(
+            f"""
+            SELECT id, phase, timestamp
+            FROM journal_entries
+            WHERE project = ?
+              AND status IN ({status_placeholders})
+              AND phase IS NOT NULL
+            """,
+            [project, *closing_statuses],
+        ).fetchall()
+        latest_close_by_phase: dict[str, tuple[datetime, int]] = {}
+        for row in close_rows:
+            phase_key = _normalise_phase_key(row["phase"])
+            if phase_key is None:
+                continue
+            ts = _parse_optional_timestamp(row["timestamp"])
+            if ts is None:
+                continue
+            marker = (ts, int(row["id"]))
+            prev = latest_close_by_phase.get(phase_key)
+            if prev is None or marker > prev:
+                latest_close_by_phase[phase_key] = marker
+
+        for phase_key, open_rows in open_items_by_phase.items():
+            close_marker = latest_close_by_phase.get(phase_key)
+            if close_marker is None:
+                continue
+            for open_id, open_ts in open_rows:
+                if (open_ts, open_id) < close_marker:
+                    closed_ids.add(open_id)
+
     return closed_ids
+
+
+def _normalise_phase_key(value: str | None) -> str | None:
+    if value is None:
+        return None
+    key = "".join(ch for ch in value.lower() if ch.isalnum())
+    return key or None
 
 
 def _context_suggested_searches(
