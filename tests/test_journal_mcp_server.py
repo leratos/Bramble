@@ -879,6 +879,48 @@ class TestJournalContext:
         assert result.data["related_projects"] == []
         assert result.data["suggested_searches"] == ["Phase 4d", "deployment"]
 
+    async def test_session_start_flow_context_then_global_search(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        now = datetime.now(tz=UTC)
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="deployment checklist for upcoming host update",
+                phase="Phase 4d",
+                timestamp=now,
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.NOTIZ,
+                content="deployment notes mirrored in sibling project",
+                timestamp=now - timedelta(minutes=1),
+            )
+        )
+
+        async with Client(server.app) as client:
+            context_result = await client.call_tool(
+                "journal_context",
+                {"project": "bramble", "n_recent": 5},
+            )
+            assert "deployment" in context_result.data["suggested_searches"]
+
+            search_result = await client.call_tool(
+                "journal_search_all",
+                {
+                    "query": "deployment",
+                    "projects": ["bramble"],
+                    "limit": 5,
+                },
+            )
+
+        assert search_result.data
+        assert search_result.data[0]["project"] == "bramble"
+        assert "deployment" in search_result.data[0]["content"]
+
     async def test_rejects_non_kebab_case_project(
         self, server: JournalMCPServer
     ) -> None:

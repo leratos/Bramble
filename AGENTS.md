@@ -11,9 +11,12 @@ bramble
 
 At the start of a work session:
 
-- Read recent context with `journal_read(project="bramble", n=20)`.
+- Prefer a curated start with
+  `journal_context(project="bramble", n_recent=10)`.
+- Fallback for raw history: `journal_read(project="bramble", n=20)`.
 - If the context is unclear, search with
-  `journal_search(project="bramble", query=..., limit=...)`.
+  `journal_search(project="bramble", query=..., limit=...)` or
+  project-overgreifend with `journal_search_all(query=..., limit=...)`.
 
 During work:
 
