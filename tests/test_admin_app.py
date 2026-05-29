@@ -162,6 +162,19 @@ class TestAdminApp:
         assert "7 Tage Bugfixes" in response.text
         assert "7 Tage Entscheidungen" in response.text
 
+    def test_dashboard_renders_workflow_guidance_panel(
+        self, admin_client: TestClient
+    ) -> None:
+        _login(admin_client)
+
+        response = admin_client.get("/")
+
+        assert response.status_code == 200
+        assert "Phase-4e Workflow-Hinweise" in response.text
+        assert "in_arbeit" in response.text
+        assert "decision" in response.text
+        assert "Append-only Journal-Eintrag geschrieben" in response.text
+
     def test_dashboard_formats_timestamps_in_display_timezone(
         self, admin_client: TestClient, db: JournalDB
     ) -> None:
@@ -257,6 +270,8 @@ class TestAdminApp:
         assert "Offene Punkte" in response.text
         assert "project context open task" in response.text
         assert "Letzte Bugfixes" in response.text
+        assert "Workflow fuer Eintragsabschluss" in response.text
+        assert "Append-only Journal-Eintrag geschrieben" in response.text
 
     def test_invalid_project_is_404(self, admin_client: TestClient) -> None:
         _login(admin_client)

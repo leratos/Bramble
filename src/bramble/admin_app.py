@@ -387,6 +387,7 @@ async def dashboard(request: Request) -> Response:
     ctx = _ctx(request)
     projects = ctx.read_model.projects()
     stats = ctx.read_model.dashboard_stats()
+    workflow = ctx.read_model.workflow_guidance()
     return _render(
         request,
         "dashboard.html",
@@ -396,6 +397,7 @@ async def dashboard(request: Request) -> Response:
             "active_project": None,
             "csrf_token": session.csrf_token,
             "stats": stats,
+            "workflow": workflow,
         },
     )
 
@@ -440,6 +442,7 @@ async def project_detail(request: Request) -> Response:
     else:
         entries = ctx.read_model.project_entries(project)
     project_context = ctx.read_model.project_context(project)
+    workflow = ctx.read_model.workflow_guidance()
 
     return _render(
         request,
@@ -454,6 +457,7 @@ async def project_detail(request: Request) -> Response:
             "entries": entries,
             "query": query,
             "search_error": search_error,
+            "workflow": workflow,
         },
     )
 

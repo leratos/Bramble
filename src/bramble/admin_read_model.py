@@ -28,6 +28,15 @@ class DashboardStats:
     recent_entries: tuple[JournalEntry, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class WorkflowGuidance:
+    """Operational workflow hints for admin users and agents."""
+
+    statuses: tuple[str, ...]
+    suggested_tags: tuple[str, ...]
+    completion_checklist: tuple[str, ...]
+
+
 class AdminReadModel:
     """Small read-only facade over :class:`JournalDB` and dashboard SQL."""
 
@@ -140,6 +149,34 @@ class AdminReadModel:
             digest_7d=digest_7d,
             open_items=open_items,
             recent_entries=recent_entries,
+        )
+
+    def workflow_guidance(self) -> WorkflowGuidance:
+        """Return conservative phase-4e workflow defaults.
+
+        The admin UI stays read-only for journal entries. These hints help
+        operators and agents create consistent append-only entries via MCP
+        clients while reviewing context in the UI.
+        """
+
+        return WorkflowGuidance(
+            statuses=("in_arbeit", "abgeschlossen", "notiz", "bugfix"),
+            suggested_tags=(
+                "decision",
+                "deployment",
+                "security",
+                "backup",
+                "admin-ui",
+                "test",
+                "docs",
+                "token",
+            ),
+            completion_checklist=(
+                "Code/Config committed",
+                "Relevante Tests oder Smoke-Checks gelaufen",
+                "Append-only Journal-Eintrag geschrieben",
+                "Naechster Schritt explizit dokumentiert",
+            ),
         )
 
     def _connect(self) -> sqlite3.Connection:

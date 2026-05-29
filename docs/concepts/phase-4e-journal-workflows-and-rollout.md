@@ -411,3 +411,24 @@ erfuellt sind:
 1. Journal-Eintrag wurde append-only geschrieben.
 1. Offene Folgearbeit ist explizit als naechster Schritt dokumentiert
   (kein implizites Wissen).
+
+## 15. Rollout-Check (Phase 4e)
+
+Dieser Check ist die minimale, reproduzierbare Abnahme fuer den
+operativen Rollout.
+
+1. Doku-Sync:
+  `AGENTS.md` und `docs/ai-client-setup.md` enthalten denselben
+  Session-Start und Abschluss-Workflow.
+1. UI-Sichtbarkeit:
+  Dashboard und Projektseite zeigen Workflow-Hinweise
+  (Status, Tags, DoD).
+1. Testabdeckung:
+  Admin-Read-Model-Test fuer Workflow-Defaults vorhanden,
+  Admin-App-Tests pruefen Rendering der Workflow-Hinweise.
+1. Verifikation:
+  Relevante pytest-Suites sind gruen und der read-only Host-Smoke ist
+  erfolgreich oder unveraendert weiterhin gueltig.
+1. Betriebsabschluss:
+  Abschluss-Eintrag im Journal mit Tests, Entscheidungen und offenem
+  Follow-up geschrieben.

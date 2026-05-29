@@ -26,6 +26,11 @@ During work:
 - Do not modify or delete existing journal entries.
 - Corrections are append-only: add a new `bugfix` or `notiz` entry that
   references the old entry by id, title, or date.
+- Use only these status values: `in_arbeit`, `abgeschlossen`, `notiz`,
+  `bugfix`.
+- Prefer a small stable tag set when relevant:
+  `decision`, `deployment`, `security`, `backup`, `admin-ui`, `test`,
+  `docs`, `token`.
 
 At the end of substantial work:
 
@@ -35,3 +40,8 @@ At the end of substantial work:
 - Include the relevant phase when known, for example `Phase 4`.
 - Mention important tests, host commands, decisions, and open follow-up
   work in the entry content.
+- Apply this completion checklist before closing:
+  1) code/config committed,
+  2) relevant tests/smoke checks executed,
+  3) append-only journal entry written,
+  4) next step documented explicitly.

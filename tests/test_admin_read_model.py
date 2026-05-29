@@ -164,3 +164,12 @@ def test_project_context_returns_local_curated_context(db: JournalDB) -> None:
     assert [entry.content for entry in context.open_items] == ["open local task"]
     assert [entry.content for entry in context.recent_bugfixes] == ["local bugfix"]
     assert context.related_projects == ()
+
+
+def test_workflow_guidance_returns_phase_4e_defaults(db: JournalDB) -> None:
+    guidance = AdminReadModel(db).workflow_guidance()
+
+    assert guidance.statuses == ("in_arbeit", "abgeschlossen", "notiz", "bugfix")
+    assert "decision" in guidance.suggested_tags
+    assert "deployment" in guidance.suggested_tags
+    assert any("Append-only" in item for item in guidance.completion_checklist)

@@ -74,13 +74,14 @@ und Suchen bleiben projektübergreifend.
 
 Zu Beginn einer Bramble-Session:
 
-1. `journal_read(project="bramble", n=20)` aufrufen.
-  Optional bevorzugt: `journal_context(project="bramble", n_recent=10)` fuer
-  einen kuratierten Startpunkt.
+1. Bevorzugt `journal_context(project="bramble", n_recent=10)` aufrufen.
+  Fallback: `journal_read(project="bramble", n=20)`.
 2. Bei unklarer Historie gezielt suchen, z. B.
    `journal_search(project="bramble", query="Phase 4", limit=10)`.
    Wenn das relevante Projekt unklar ist, `journal_search_all(...)` nutzen.
-3. Die gelesenen Einträge bei Planung und Statusantworten berücksichtigen.
+3. Falls ein neuer Arbeitsblock startet: frueh einen klaren
+  `in_arbeit`-Eintrag mit Scope und naechstem Schritt anlegen.
+4. Die gelesenen Einträge bei Planung und Statusantworten berücksichtigen.
 
 Während der Arbeit:
 
@@ -98,6 +99,11 @@ Am Ende einer substanziellen Arbeit:
 * Einen Abschluss- oder Fortschrittseintrag schreiben.
 * Tests, Host-Kommandos und offene nächste Schritte im `content`
   erwähnen.
+* Vor Abschluss diese DoD-Checks einhalten:
+  1. Code/Config committed.
+  2. Relevante Tests oder Smoke-Checks gelaufen.
+  3. Append-only Journal-Eintrag geschrieben.
+  4. Naechster Schritt explizit dokumentiert.
 
 ## Status-Werte
 

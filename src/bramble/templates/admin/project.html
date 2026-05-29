@@ -74,6 +74,26 @@
     </div>
   </section>
 
+  <section class="action-panel" aria-labelledby="project-workflow-title">
+    <h2 id="project-workflow-title">Workflow fuer Eintragsabschluss</h2>
+    <p>Empfohlene Statuswerte und DoD fuer dieses Projekt.</p>
+    <div class="chip-list" aria-label="Status-Empfehlung">
+      {% for status in workflow.statuses %}
+        <span>{{ status }}</span>
+      {% endfor %}
+    </div>
+    <div class="chip-list" aria-label="Tag-Vorschlaege">
+      {% for tag in workflow.suggested_tags %}
+        <span>{{ tag }}</span>
+      {% endfor %}
+    </div>
+    <ul>
+      {% for item in workflow.completion_checklist %}
+        <li>{{ item }}</li>
+      {% endfor %}
+    </ul>
+  </section>
+
   {% if search_error %}
     <p class="alert" role="alert">{{ search_error }}</p>
   {% endif %}
