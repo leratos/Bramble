@@ -205,6 +205,80 @@ def test_search_global_filters_by_status_and_since(db: JournalDB) -> None:
     assert [entry.content for entry in hits] == ["needle new bugfix"]
 
 
+def test_search_global_filters_by_project_and_tags(db: JournalDB) -> None:
+    now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
+    db.append(
+        JournalEntry(
+            project="bramble",
+            status=JournalStatus.BUGFIX,
+            content="needle alpha",
+            tags=["deployment", "admin-ui"],
+            timestamp=now,
+        )
+    )
+    db.append(
+        JournalEntry(
+            project="elder-berry",
+            status=JournalStatus.BUGFIX,
+            content="needle beta",
+            tags=["deployment"],
+            timestamp=now,
+        )
+    )
+
+    hits = AdminReadModel(db).search_global(
+        "needle",
+        project="bramble",
+        tags=("deployment", "admin-ui"),
+        since="all",
+        now=now,
+    )
+
+    assert [entry.content for entry in hits] == ["needle alpha"]
+
+
+def test_search_global_filters_by_status_project_and_tags(db: JournalDB) -> None:
+    now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
+    db.append(
+        JournalEntry(
+            project="bramble",
+            status=JournalStatus.BUGFIX,
+            content="needle alpha",
+            tags=["deployment", "admin-ui"],
+            timestamp=now,
+        )
+    )
+    db.append(
+        JournalEntry(
+            project="bramble",
+            status=JournalStatus.NOTIZ,
+            content="needle beta",
+            tags=["deployment", "admin-ui"],
+            timestamp=now,
+        )
+    )
+    db.append(
+        JournalEntry(
+            project="elder-berry",
+            status=JournalStatus.BUGFIX,
+            content="needle gamma",
+            tags=["deployment", "admin-ui"],
+            timestamp=now,
+        )
+    )
+
+    hits = AdminReadModel(db).search_global(
+        "needle",
+        project="bramble",
+        status="bugfix",
+        tags=("deployment", "admin-ui"),
+        since="all",
+        now=now,
+    )
+
+    assert [entry.content for entry in hits] == ["needle alpha"]
+
+
 def test_search_global_rejects_invalid_since(db: JournalDB) -> None:
     with pytest.raises(ValueError):
         AdminReadModel(db).search_global("needle", since="1y")

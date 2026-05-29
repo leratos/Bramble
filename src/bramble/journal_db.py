@@ -358,6 +358,41 @@ class JournalDB:
             )
             conn.commit()
 
+    def project_status(self, name: str) -> str | None:
+        """Return the lifecycle status for a registered project."""
+
+        self._validate_project_arg(name)
+        sql = "SELECT status FROM projects WHERE name = ?"
+        with self._connect() as conn:
+            row = conn.execute(sql, (name.strip(),)).fetchone()
+        if row is None:
+            return None
+        return str(row[0])
+
+    def set_project_status(self, name: str, status: str) -> None:
+        """Update the lifecycle status for an existing project."""
+
+        self._validate_project_arg(name)
+        name = name.strip()
+        if status not in _PROJECT_STATUSES:
+            allowed = ", ".join(sorted(_PROJECT_STATUSES))
+            raise ValueError(
+                f"status {status!r} is not allowed; must be one of: {allowed}"
+            )
+
+        now = datetime.now(tz=UTC).isoformat()
+        archived_at = now if status == "archived" else None
+        sql = (
+            "UPDATE projects "
+            "SET status = ?, updated_at = ?, archived_at = ? "
+            "WHERE name = ?"
+        )
+        with self._connect() as conn:
+            cursor = conn.execute(sql, (status, now, archived_at, name))
+            if cursor.rowcount == 0:
+                raise ValueError(f"unknown project {name!r}")
+            conn.commit()
+
     # ------------------------------------------------------------------
     # Queries
     # ------------------------------------------------------------------

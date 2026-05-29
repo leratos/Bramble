@@ -868,6 +868,30 @@ class TestProjectOverview:
         assert summary.last_timestamp is None
         assert summary.last_timestamp_iso() is None
 
+    def test_project_status_can_be_read_and_updated(self, db: JournalDB) -> None:
+        db.register_project("berry-gym")
+
+        assert db.project_status("berry-gym") == "active"
+
+        db.set_project_status("berry-gym", "paused")
+
+        assert db.project_status("berry-gym") == "paused"
+        with sqlite3.connect(db.db_path) as conn:
+            row = conn.execute(
+                "SELECT status, archived_at FROM projects WHERE name = 'berry-gym'"
+            ).fetchone()
+        assert row == ("paused", None)
+
+        db.set_project_status("berry-gym", "archived")
+
+        assert db.project_status("berry-gym") == "archived"
+        with sqlite3.connect(db.db_path) as conn:
+            row = conn.execute(
+                "SELECT status, archived_at FROM projects WHERE name = 'berry-gym'"
+            ).fetchone()
+        assert row[0] == "archived"
+        assert row[1] is not None
+
     def test_counts_and_last_timestamp_per_project(self, db: JournalDB) -> None:
         base = datetime(2026, 5, 12, 8, 0, tzinfo=UTC)
         db.append(_entry(project="bramble", content="b1", timestamp=base))

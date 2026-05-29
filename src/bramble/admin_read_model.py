@@ -87,6 +87,16 @@ class AdminReadModel:
             rows = conn.execute(sql, (project, limit)).fetchall()
             return _rows_to_entries(conn, rows)
 
+    def project_status(self, project: str) -> str | None:
+        """Return the lifecycle status for a project, if it exists."""
+
+        return self._db.project_status(project)
+
+    def set_project_status(self, project: str, status: str) -> None:
+        """Update the lifecycle status for a project."""
+
+        self._db.set_project_status(project, status)
+
     def search_project(
         self,
         project: str,
@@ -115,8 +125,10 @@ class AdminReadModel:
         self,
         query: str,
         *,
+        project: str | None = None,
         status: str | None = None,
         since: str = "30d",
+        tags: tuple[str, ...] | None = None,
         limit: int = 80,
         now: datetime | None = None,
     ) -> list[JournalEntry]:
@@ -134,11 +146,17 @@ class AdminReadModel:
                 raise ValueError("status filter is invalid")
             status_filter = (status,)
 
+        project_filter: tuple[str, ...] | None = None
+        if project is not None and project != "all":
+            project_filter = (project,)
+
         cutoff = _search_since_cutoff(since, now=now)
         entries = self._db.search_all(
             query=query,
             limit=limit,
+            projects=project_filter,
             statuses=status_filter,
+            tags=tags,
         )
         if cutoff is None:
             return entries

@@ -153,6 +153,12 @@ def create_admin_app(
             methods=["GET"],
             name="project_detail",
         ),
+        Route(
+            "/projects/{project:str}/status",
+            project_status_update,
+            methods=["POST"],
+            name="project_status_update",
+        ),
         Mount(
             "/static",
             StaticFiles(directory=str(static_dir)),
@@ -444,6 +450,9 @@ async def project_detail(request: Request) -> Response:
         entries = ctx.read_model.project_entries(project)
     project_context = ctx.read_model.project_context(project)
     workflow = ctx.read_model.workflow_guidance()
+    project_status = ctx.read_model.project_status(project)
+    assist = request.query_params.get("assist", "").strip().lower()
+    assist_mode = assist if assist in {"bugfix", "notiz"} else None
 
     return _render(
         request,
@@ -455,12 +464,63 @@ async def project_detail(request: Request) -> Response:
             "csrf_token": session.csrf_token,
             "summary": summary,
             "project_context": project_context,
+            "project_status": project_status,
             "entries": entries,
             "query": query,
             "search_error": search_error,
             "workflow": workflow,
+            "assist_mode": assist_mode,
         },
     )
+
+
+async def project_status_update(request: Request) -> Response:
+    session = _current_session(request)
+    if session is None:
+        return _login_redirect(request)
+
+    project = request.path_params["project"]
+    if not _PROJECT_RE.fullmatch(project):
+        return PlainTextResponse("unknown project", status_code=404)
+
+    form = await _read_urlencoded_form(request)
+    ctx = _ctx(request)
+    if not _csrf_is_valid(session, form):
+        _audit(
+            request,
+            session,
+            action="csrf.denied",
+            target_type="project",
+            target=project,
+            result="denied",
+        )
+        return PlainTextResponse("forbidden", status_code=403)
+
+    status = form.get("status", "")
+    try:
+        ctx.read_model.set_project_status(project, status)
+    except ValueError as exc:
+        _audit(
+            request,
+            session,
+            action="project.status",
+            target_type="project",
+            target=project,
+            result="denied",
+            details={"reason": str(exc)},
+        )
+        return PlainTextResponse(str(exc), status_code=400)
+
+    _audit(
+        request,
+        session,
+        action="project.status",
+        target_type="project",
+        target=project,
+        result="success",
+        details={"status": status},
+    )
+    return RedirectResponse(url=f"/projects/{project}", status_code=303)
 
 
 async def global_search(request: Request) -> Response:
@@ -471,8 +531,14 @@ async def global_search(request: Request) -> Response:
     ctx = _ctx(request)
     projects = ctx.read_model.projects()
     query = request.query_params.get("q", "").strip()
+    project_filter = request.query_params.get("project", "all").strip() or "all"
     status_filter = request.query_params.get("status", "all").strip() or "all"
     since_filter = request.query_params.get("since", "30d").strip() or "30d"
+    tags_filter = request.query_params.get("tags", "").strip()
+
+    tags = tuple(
+        tag.strip() for tag in tags_filter.split(",") if tag.strip()
+    )
 
     entries = []
     search_error: str | None = None
@@ -483,8 +549,10 @@ async def global_search(request: Request) -> Response:
             try:
                 entries = ctx.read_model.search_global(
                     query,
+                    project=project_filter,
                     status=status_filter,
                     since=since_filter,
+                    tags=tags or None,
                     limit=80,
                 )
             except ValueError:
@@ -500,8 +568,11 @@ async def global_search(request: Request) -> Response:
             "csrf_token": session.csrf_token,
             "entries": entries,
             "query": query,
+            "project_filter": project_filter,
             "status_filter": status_filter,
             "since_filter": since_filter,
+            "tags_filter": tags_filter,
+            "tags_values": tags,
             "search_error": search_error,
         },
     )

@@ -250,6 +250,52 @@ class TestAdminApp:
         assert "read-only dashboard entry" in response.text
         assert len(db.read("bramble", n=10)) == before
 
+    def test_project_view_renders_lifecycle_and_assist_panel(
+        self, admin_client: TestClient
+    ) -> None:
+        _login(admin_client)
+
+        response = admin_client.get("/projects/bramble?assist=bugfix")
+
+        assert response.status_code == 200
+        assert "Projekt-Lifecycle" in response.text
+        assert "Lifecycle: active" in response.text
+        assert "Korrektur-Assistent" in response.text
+        assert "Bugfix zu diesem Eintrag" in response.text
+
+    def test_project_status_update_changes_registry_status(
+        self, admin_client: TestClient
+    ) -> None:
+        _login(admin_client)
+        csrf = _csrf(admin_client)
+
+        response = admin_client.post(
+            "/projects/bramble/status",
+            data={"csrf_token": csrf, "status": "paused"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+
+        refreshed = admin_client.get("/projects/bramble")
+
+        assert refreshed.status_code == 200
+        assert "Lifecycle: paused" in refreshed.text
+
+    def test_project_status_update_rejects_invalid_status(
+        self, admin_client: TestClient
+    ) -> None:
+        _login(admin_client)
+        csrf = _csrf(admin_client)
+
+        response = admin_client.post(
+            "/projects/bramble/status",
+            data={"csrf_token": csrf, "status": "broken"},
+        )
+
+        assert response.status_code == 400
+        assert "not allowed" in response.text
+
     def test_global_search_finds_cross_project_hits(
         self, admin_client: TestClient, db: JournalDB
     ) -> None:
@@ -325,6 +371,35 @@ class TestAdminApp:
 
         assert response.status_code == 200
         assert "Ungueltiger Filterwert." in response.text
+
+    def test_global_search_supports_project_and_tag_filters(
+        self, admin_client: TestClient, db: JournalDB
+    ) -> None:
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.BUGFIX,
+                content="project tag needle alpha",
+                tags=["deployment", "admin-ui"],
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.BUGFIX,
+                content="project tag needle beta",
+                tags=["deployment"],
+            )
+        )
+        _login(admin_client)
+
+        response = admin_client.get(
+            "/search?q=project%20tag%20needle&project=bramble&tags=deployment,admin-ui"
+        )
+
+        assert response.status_code == 200
+        assert "project tag needle alpha" in response.text
+        assert "project tag needle beta" not in response.text
 
     def test_project_view_renders_context_panel(
         self, admin_client: TestClient, db: JournalDB

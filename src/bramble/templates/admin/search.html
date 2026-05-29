@@ -15,6 +15,14 @@
     <label for="q">Query</label>
     <input id="q" name="q" value="{{ query }}" maxlength="200" placeholder="FTS5-Suche">
 
+    <label for="project">Projekt</label>
+    <select id="project" name="project">
+      <option value="all" {% if project_filter == 'all' %}selected{% endif %}>alle</option>
+      {% for project in projects %}
+        <option value="{{ project.name }}" {% if project_filter == project.name %}selected{% endif %}>{{ project.name }}</option>
+      {% endfor %}
+    </select>
+
     <label for="status">Status</label>
     <select id="status" name="status">
       <option value="all" {% if status_filter == 'all' %}selected{% endif %}>alle</option>
@@ -23,6 +31,9 @@
       <option value="notiz" {% if status_filter == 'notiz' %}selected{% endif %}>notiz</option>
       <option value="bugfix" {% if status_filter == 'bugfix' %}selected{% endif %}>bugfix</option>
     </select>
+
+    <label for="tags">Tags</label>
+    <input id="tags" name="tags" value="{{ tags_filter }}" maxlength="200" placeholder="tag1,tag2">
 
     <label for="since">Zeitraum</label>
     <select id="since" name="since">
@@ -37,6 +48,14 @@
       <a href="{{ url_for('global_search') }}">Zuruecksetzen</a>
     {% endif %}
   </form>
+
+  {% if tags_values %}
+    <div class="chip-list" aria-label="Aktive Tagfilter">
+      {% for tag in tags_values %}
+        <span>{{ tag }}</span>
+      {% endfor %}
+    </div>
+  {% endif %}
 
   {% if search_error %}
     <p class="alert" role="alert">{{ search_error }}</p>

@@ -21,6 +21,26 @@
           noch keine Eintraege
         {% endif %}
       </p>
+      {% if project_status %}
+        <p class="entry-status">Lifecycle: {{ project_status }}</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="action-panel" aria-labelledby="project-status-title">
+    <h2 id="project-status-title">Projekt-Lifecycle</h2>
+    <p>Status des Projekts umschalten. Dies betrifft nur die Registry, nicht die Journal-Eintraege.</p>
+    <div class="chip-list" aria-label="Aktueller Status">
+      <span>{{ project_status or 'unbekannt' }}</span>
+    </div>
+    <div class="chip-list" aria-label="Statuswechsel">
+      {% for status in ['active', 'paused', 'archived'] %}
+        <form method="post" action="{{ url_for('project_status_update', project=summary.name) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="status" value="{{ status }}">
+          <button type="submit" {% if project_status == status %}disabled{% endif %}>{{ status }}</button>
+        </form>
+      {% endfor %}
     </div>
   </section>
 
@@ -92,6 +112,30 @@
         <li>{{ item }}</li>
       {% endfor %}
     </ul>
+  </section>
+
+  <section class="action-panel" aria-labelledby="correction-assist-title">
+    <h2 id="correction-assist-title">Korrektur-Assistent</h2>
+    <p>Hilfen fuer die naechste append-only Journal-Aktion.</p>
+    <div class="chip-list">
+      <a href="{{ url_for('project_detail', project=summary.name) }}?assist=notiz">Nachtrag erstellen</a>
+      <a href="{{ url_for('project_detail', project=summary.name) }}?assist=bugfix">Bugfix zu diesem Eintrag</a>
+    </div>
+    {% if assist_mode == 'notiz' %}
+      <div class="notice">
+        <h3>Nachtrag erstellen</h3>
+        <p>Status: <strong>notiz</strong></p>
+        <p>Empfohlene Inhalte: Entscheidung, Betriebsereignis oder Kontext.</p>
+        <p>Empfohlene Tags: decision, deployment, security, backup, token.</p>
+      </div>
+    {% elif assist_mode == 'bugfix' %}
+      <div class="notice">
+        <h3>Bugfix zu diesem Eintrag</h3>
+        <p>Status: <strong>bugfix</strong></p>
+        <p>Empfohlene Inhalte: Korrektur, Referenz auf alten Eintrag, Auswirkung.</p>
+        <p>Link-Relation: <strong>corrects</strong></p>
+      </div>
+    {% endif %}
   </section>
 
   {% if search_error %}
