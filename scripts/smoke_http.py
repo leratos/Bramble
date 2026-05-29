@@ -29,14 +29,16 @@ every write the script makes goes into that project.
 
 What it does
 ------------
-1. Connects with the token, lists tools, checks all five are present.
+1. Connects with the token, lists tools, checks all six are present.
 2. Verifies a tokenless request is rejected (auth gate is on).
 3. Appends two journal entries to ``--project``.
 4. Reads them back via ``journal_read``.
 5. Searches for a keyword only one entry contains.
-6. Verifies a write into a *foreign* project is rejected (Decision B).
-7. Calls ``journal_list_projects`` and prints the aggregate view.
-8. Issues two deliberately bad calls (unknown status, non-kebab
+6. Searches for that keyword via filtered ``journal_search_all``.
+7. Verifies the entries appear in ``journal_digest``.
+8. Verifies a write into a *foreign* project is rejected (Decision B).
+9. Calls ``journal_list_projects`` and prints the aggregate view.
+10. Issues two deliberately bad calls (unknown status, non-kebab
    project) to verify clean ``ToolError`` translation.
 
 Exit codes
@@ -129,6 +131,7 @@ def unwrap(result: Any) -> Any:
 EXPECTED_TOOLS = {
     "journal_read",
     "journal_append",
+    "journal_digest",
     "journal_search",
     "journal_search_all",
     "journal_list_projects",
@@ -149,7 +152,7 @@ async def run_smoke(url: str, token: str, project: str) -> int:
         if missing:
             fail(f"missing expected tools: {sorted(missing)}")
             return 1
-        ok("all five expected tools are registered")
+        ok("all six expected tools are registered")
 
         # ------------------------------------------------------------------
         # 2. The auth gate rejects a tokenless request
@@ -262,7 +265,27 @@ async def run_smoke(url: str, token: str, project: str) -> int:
         ok("cross-project search found the beta entry with filters")
 
         # ------------------------------------------------------------------
-        # 7. Write-scope binding: a foreign project is refused
+        # 7. Digest
+        # ------------------------------------------------------------------
+        section(f"journal_digest for {project!r}")
+        result = await client.call_tool(
+            "journal_digest",
+            {"project": project, "since": "24h", "limit": 10},
+        )
+        digest = unwrap(result)
+        print(
+            "  digest counts: "
+            f"projects={digest['counts_by_project']} "
+            f"statuses={digest['counts_by_status']}"
+        )
+        digest_ids = {entry["id"] for entry in digest["entries"]}
+        if beta["id"] not in digest_ids or alpha["id"] not in digest_ids:
+            fail("digest did not include the two entries written by this smoke run")
+            return 1
+        ok("digest includes the smoke entries")
+
+        # ------------------------------------------------------------------
+        # 8. Write-scope binding: a foreign project is refused
         # ------------------------------------------------------------------
         section(f"write-scope check (append into {FOREIGN_PROJECT!r})")
         try:
@@ -284,7 +307,7 @@ async def run_smoke(url: str, token: str, project: str) -> int:
             return 1
 
         # ------------------------------------------------------------------
-        # 8. Overview after writes
+        # 9. Overview after writes
         # ------------------------------------------------------------------
         section("journal_list_projects (after writes)")
         result = await client.call_tool("journal_list_projects", {})
@@ -300,7 +323,7 @@ async def run_smoke(url: str, token: str, project: str) -> int:
         ok(f"{project!r} appears in the overview")
 
         # ------------------------------------------------------------------
-        # 9. Negative: unknown status
+        # 10. Negative: unknown status
         # ------------------------------------------------------------------
         section("negative test: unknown status")
         try:
@@ -318,7 +341,7 @@ async def run_smoke(url: str, token: str, project: str) -> int:
             return 1
 
         # ------------------------------------------------------------------
-        # 10. Negative: non-kebab project name
+        # 11. Negative: non-kebab project name
         # ------------------------------------------------------------------
         section("negative test: non-kebab project name")
         try:

@@ -29,16 +29,24 @@ import re
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from bramble.journal_entry import JournalEntry, JournalEntryLink, JournalStatus
+from bramble.journal_digest import JournalDigest
 from bramble.project_summary import ProjectSummary
 
 logger = logging.getLogger(__name__)
 
 _PROJECT_STATUSES = {"active", "paused", "archived"}
 _SEARCH_ALL_LIMIT_MAX = 100
+_DIGEST_LIMIT_MAX = 100
+_DIGEST_RELATIVE_RANGES = {
+    "24h": timedelta(hours=24),
+    "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
+}
+_DECISION_RE = re.compile(r"\b(decision|entscheidung|festgelegt)\b", re.IGNORECASE)
 _TAG_FILTER_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
@@ -465,6 +473,84 @@ class JournalDB:
             )
             return []
 
+    def digest(
+        self,
+        *,
+        project: str | None = None,
+        since: str = "7d",
+        until: str | None = None,
+        tags: object = None,
+        limit: int = 80,
+        now: datetime | None = None,
+    ) -> JournalDigest:
+        """Return a structured digest over a time range.
+
+        Counts cover the full filtered range. Entry lists are capped by
+        ``limit`` and returned newest first.
+        """
+
+        self._validate_digest_limit_arg(limit)
+        if project is not None:
+            self._validate_project_arg(project)
+            project = project.strip()
+        range_since, range_until = _resolve_digest_range(
+            since=since,
+            until=until,
+            now=now,
+        )
+        tag_filter = _normalise_tag_filter_values(tags)
+        where, params = _digest_where_clause(
+            project=project,
+            range_since=range_since,
+            range_until=range_until,
+            tags=tag_filter,
+        )
+        count_sql = (
+            "SELECT je.project, je.status, COUNT(*) AS entry_count "
+            "FROM journal_entries je "
+            f"WHERE {' AND '.join(where)} "
+            "GROUP BY je.project, je.status "
+            "ORDER BY je.project ASC, je.status ASC"
+        )
+        entry_sql = (
+            "SELECT je.id, je.project, je.timestamp, je.status, "
+            "       je.phase, je.title, je.content, "
+            "       je.actor, je.client, je.source "
+            "FROM journal_entries je "
+            f"WHERE {' AND '.join(where)} "
+            "ORDER BY je.timestamp DESC, je.id DESC "
+            "LIMIT ?"
+        )
+        with self._connect() as conn:
+            count_rows = conn.execute(count_sql, params).fetchall()
+            rows = conn.execute(entry_sql, [*params, limit]).fetchall()
+            entries = tuple(self._rows_to_entries(conn, rows))
+
+        counts_by_project: dict[str, int] = {}
+        counts_by_status: dict[str, int] = {}
+        for row in count_rows:
+            count = int(row["entry_count"])
+            counts_by_project[row["project"]] = (
+                counts_by_project.get(row["project"], 0) + count
+            )
+            counts_by_status[row["status"]] = counts_by_status.get(row["status"], 0) + count
+
+        return JournalDigest(
+            range_since=range_since,
+            range_until=range_until,
+            projects=tuple(sorted(counts_by_project)),
+            counts_by_project=counts_by_project,
+            counts_by_status=counts_by_status,
+            entries=entries,
+            open_items=tuple(
+                entry for entry in entries if entry.status is JournalStatus.IN_ARBEIT
+            ),
+            bugfixes=tuple(
+                entry for entry in entries if entry.status is JournalStatus.BUGFIX
+            ),
+            decisions=tuple(entry for entry in entries if _entry_is_decision(entry)),
+        )
+
     def project_overview(self) -> list[ProjectSummary]:
         """Return one :class:`ProjectSummary` per project, newest activity first.
 
@@ -590,6 +676,12 @@ class JournalDB:
         JournalDB._validate_limit_arg(value, name="limit")
         if value > _SEARCH_ALL_LIMIT_MAX:
             raise ValueError(f"limit must be at most {_SEARCH_ALL_LIMIT_MAX}")
+
+    @staticmethod
+    def _validate_digest_limit_arg(value: object) -> None:
+        JournalDB._validate_limit_arg(value, name="limit")
+        if value > _DIGEST_LIMIT_MAX:
+            raise ValueError(f"limit must be at most {_DIGEST_LIMIT_MAX}")
 
 
 def _migrate_projects_from_entries(conn: sqlite3.Connection) -> None:
@@ -854,3 +946,91 @@ def _normalise_tag_filter_values(values: object) -> tuple[str, ...]:
             )
         normalised.add(tag)
     return tuple(sorted(normalised))
+
+
+def _resolve_digest_range(
+    *,
+    since: str,
+    until: str | None,
+    now: datetime | None,
+) -> tuple[datetime, datetime]:
+    if now is None:
+        range_until = datetime.now(tz=UTC)
+    else:
+        range_until = _normalise_digest_datetime(now, name="now")
+    if until is not None:
+        range_until = _parse_digest_timestamp(until, name="until")
+    range_since = _parse_digest_since(since, range_until=range_until)
+    if range_until <= range_since:
+        raise ValueError("until must be after since")
+    return range_since, range_until
+
+
+def _parse_digest_since(value: str, *, range_until: datetime) -> datetime:
+    if not isinstance(value, str):
+        raise TypeError("since must be a string")
+    value = value.strip()
+    if not value:
+        raise ValueError("since must not be empty")
+    if value in _DIGEST_RELATIVE_RANGES:
+        return range_until - _DIGEST_RELATIVE_RANGES[value]
+    try:
+        return _parse_digest_timestamp(value, name="since")
+    except ValueError as exc:
+        allowed = ", ".join(_DIGEST_RELATIVE_RANGES)
+        raise ValueError(
+            f"since must be one of {allowed} or an ISO timestamp"
+        ) from exc
+
+
+def _parse_digest_timestamp(value: str, *, name: str) -> datetime:
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must be a string")
+    value = value.strip()
+    if not value:
+        raise ValueError(f"{name} must not be empty")
+    try:
+        timestamp = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an ISO timestamp") from exc
+    return _normalise_digest_datetime(timestamp, name=name)
+
+
+def _normalise_digest_datetime(value: datetime, *, name: str) -> datetime:
+    if not isinstance(value, datetime):
+        raise TypeError(f"{name} must be a datetime")
+    if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _digest_where_clause(
+    *,
+    project: str | None,
+    range_since: datetime,
+    range_until: datetime,
+    tags: tuple[str, ...],
+) -> tuple[list[str], list[object]]:
+    where = ["je.timestamp >= ?", "je.timestamp <= ?"]
+    params: list[object] = [range_since.isoformat(), range_until.isoformat()]
+    if project is not None:
+        where.append("je.project = ?")
+        params.append(project)
+    for index, tag in enumerate(tags):
+        where.append(
+            "EXISTS ("
+            f"SELECT 1 FROM journal_entry_tags jet{index} "
+            f"WHERE jet{index}.entry_id = je.id AND jet{index}.tag = ?"
+            ")"
+        )
+        params.append(tag)
+    return where, params
+
+
+def _entry_is_decision(entry: JournalEntry) -> bool:
+    if "decision" in entry.tags:
+        return True
+    return bool(
+        _DECISION_RE.search(entry.title or "")
+        or _DECISION_RE.search(entry.content)
+    )

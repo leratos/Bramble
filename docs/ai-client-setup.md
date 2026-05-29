@@ -60,7 +60,8 @@ Der Client sollte nach erfolgreicher Verbindung diese Tools sehen:
 | `journal_read(project, n=80)` | Letzte Einträge eines Projekts lesen |
 | `journal_append(project, status, content, phase=None, title=None)` | Neuen Eintrag schreiben |
 | `journal_search(project, query, limit=20)` | Volltextsuche in einem Projekt |
-| `journal_search_all(query, limit=20, projects=None, statuses=None, tags=None)` | Volltextsuche ueber alle Projekte mit optionalen Filtern |
+| `journal_search_all(...)` | Volltextsuche ueber alle Projekte mit optionalen Filtern |
+| `journal_digest(...)` | Zeitraum-Digest mit Counts, offenen Punkten, Bugfixes und Entscheidungen |
 | `journal_list_projects()` | Projekte mit Counts und letzter Aktivität listen |
 
 `journal_append` ist an das Projekt des Tokens gebunden. Ein
@@ -162,7 +163,7 @@ Nutze nur Statuswerte: in_arbeit, abgeschlossen, notiz, bugfix.
 
 ## Verifikation eines neuen Clients
 
-1. Tool-Liste prüfen: alle fuenf Bramble-Tools müssen sichtbar sein.
+1. Tool-Liste prüfen: alle sechs Bramble-Tools müssen sichtbar sein.
 2. Lesen testen:
 
 ```text
@@ -181,7 +182,13 @@ journal_search(project="bramble", query="Backup", limit=5)
 journal_search_all(query="Backup", limit=5)
 ```
 
-5. Schreibtest nur als echten Journal-Eintrag ausführen, nicht als
+5. Digest testen:
+
+```text
+journal_digest(project="bramble", since="7d")
+```
+
+6. Schreibtest nur als echten Journal-Eintrag ausführen, nicht als
    beliebigen Smoke-Eintrag. Beispiel: `title="Client <name> angebunden"`.
 
 Wenn ein Schreibtest fehlschlägt, zuerst prüfen:

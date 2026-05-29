@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any
 
 from bramble.auth_validator import AuthValidator
 from bramble.journal_db import JournalDB
+from bramble.journal_digest import JournalDigest
 from bramble.journal_entry import JournalEntry, JournalStatus
 from bramble.project_summary import ProjectSummary
 from bramble.rate_limiter import RateLimiter
@@ -47,6 +48,7 @@ if TYPE_CHECKING:
 __all__ = [
     "AuthValidator",
     "JournalDB",
+    "JournalDigest",
     "JournalEntry",
     "JournalMCPServer",
     "JournalStatus",

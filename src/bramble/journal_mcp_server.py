@@ -33,6 +33,7 @@ from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 
 from bramble.auth_validator import AuthValidator
 from bramble.journal_db import JournalDB
+from bramble.journal_digest import JournalDigest
 from bramble.journal_entry import JournalEntry, JournalStatus
 from bramble.mcp_errors import translate_errors
 from bramble.rate_limiter import RateLimiter
@@ -110,6 +111,22 @@ def _entry_to_dict(entry: JournalEntry) -> dict[str, Any]:
             {"from_entry_id": link.entry_id, "relation": link.relation.value}
             for link in entry.backlinks
         ],
+    }
+
+
+def _digest_to_dict(digest: JournalDigest) -> dict[str, Any]:
+    return {
+        "range": {
+            "since": digest.range_since.isoformat(),
+            "until": digest.range_until.isoformat(),
+        },
+        "projects": list(digest.projects),
+        "counts_by_project": dict(digest.counts_by_project),
+        "counts_by_status": dict(digest.counts_by_status),
+        "entries": [_entry_to_dict(entry) for entry in digest.entries],
+        "open_items": [_entry_to_dict(entry) for entry in digest.open_items],
+        "bugfixes": [_entry_to_dict(entry) for entry in digest.bugfixes],
+        "decisions": [_entry_to_dict(entry) for entry in digest.decisions],
     }
 
 
@@ -283,8 +300,9 @@ class JournalMCPServer:
                 "Shared development journal across projects. "
                 "Use journal_append to record new entries, journal_read "
                 "to fetch recent entries, journal_search or "
-                "journal_search_all for full-text search, and "
-                "journal_list_projects for an overview."
+                "journal_search_all for full-text search, journal_digest "
+                "for period summaries, and journal_list_projects for an "
+                "overview."
             ),
         )
         self._register_tools()
@@ -438,6 +456,35 @@ class JournalMCPServer:
                 tags=tags,
             )
             return [_entry_to_dict(e) for e in entries]
+
+        @app.tool
+        @translate_errors
+        async def journal_digest(
+            project: str | None = None,
+            since: str = "7d",
+            until: str | None = None,
+            tags: list[str] | None = None,
+            limit: int = 80,
+        ) -> dict[str, Any]:
+            """Return a structured journal digest for a time range.
+
+            ``since`` accepts ``24h``, ``7d``, ``30d`` or an ISO
+            timestamp. ``until`` accepts an ISO timestamp and defaults
+            to now. The tool is read-only and returns deterministic
+            counts plus capped entry lists.
+            """
+
+            if project is not None:
+                _require_kebab_case(project)
+            digest = await asyncio.to_thread(
+                db.digest,
+                project=project,
+                since=since,
+                until=until,
+                tags=tags,
+                limit=limit,
+            )
+            return _digest_to_dict(digest)
 
         @app.tool
         @translate_errors
