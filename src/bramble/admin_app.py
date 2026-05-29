@@ -132,6 +132,7 @@ def create_admin_app(
         Route("/login", login_submit, methods=["POST"], name="login_submit"),
         Route("/logout", logout, methods=["POST"], name="logout"),
         Route("/projects", projects_index, methods=["GET"], name="projects"),
+        Route("/search", global_search, methods=["GET"], name="global_search"),
         Route("/tokens", tokens_index, methods=["GET"], name="tokens"),
         Route("/tokens", token_create, methods=["POST"], name="token_create"),
         Route(
@@ -458,6 +459,50 @@ async def project_detail(request: Request) -> Response:
             "query": query,
             "search_error": search_error,
             "workflow": workflow,
+        },
+    )
+
+
+async def global_search(request: Request) -> Response:
+    session = _current_session(request)
+    if session is None:
+        return _login_redirect(request)
+
+    ctx = _ctx(request)
+    projects = ctx.read_model.projects()
+    query = request.query_params.get("q", "").strip()
+    status_filter = request.query_params.get("status", "all").strip() or "all"
+    since_filter = request.query_params.get("since", "30d").strip() or "30d"
+
+    entries = []
+    search_error: str | None = None
+    if query:
+        if len(query) > _MAX_SEARCH_CHARS:
+            search_error = "Die Suche ist zu lang."
+        else:
+            try:
+                entries = ctx.read_model.search_global(
+                    query,
+                    status=status_filter,
+                    since=since_filter,
+                    limit=80,
+                )
+            except ValueError:
+                search_error = "Ungueltiger Filterwert."
+
+    return _render(
+        request,
+        "search.html",
+        {
+            "actor": session.actor,
+            "projects": _project_rows(projects),
+            "active_project": None,
+            "csrf_token": session.csrf_token,
+            "entries": entries,
+            "query": query,
+            "status_filter": status_filter,
+            "since_filter": since_filter,
+            "search_error": search_error,
         },
     )
 

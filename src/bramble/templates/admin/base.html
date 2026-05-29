@@ -15,6 +15,7 @@
       <nav aria-label="Hauptnavigation">
         <a href="{{ url_for('dashboard') }}">Dashboard</a>
         <a href="{{ url_for('projects') }}">Projekte</a>
+        <a href="{{ url_for('global_search') }}">Suche</a>
         <a href="{{ url_for('tokens') }}">Token</a>
       </nav>
       <form class="logout-form" method="post" action="{{ url_for('logout') }}">

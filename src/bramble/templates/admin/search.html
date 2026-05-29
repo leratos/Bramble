@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Globale Suche - Bramble Admin{% endblock %}
+
+{% block content %}
+  <section class="page-head" aria-labelledby="search-title">
+    <div>
+      <p class="eyebrow">Suche</p>
+      <h1 id="search-title">Globale Suche</h1>
+      <p>Projektuebergreifende Volltextsuche mit Status- und Zeitraum-Filter.</p>
+    </div>
+  </section>
+
+  <form class="search-bar" method="get" action="{{ url_for('global_search') }}">
+    <label for="q">Query</label>
+    <input id="q" name="q" value="{{ query }}" maxlength="200" placeholder="FTS5-Suche">
+
+    <label for="status">Status</label>
+    <select id="status" name="status">
+      <option value="all" {% if status_filter == 'all' %}selected{% endif %}>alle</option>
+      <option value="in_arbeit" {% if status_filter == 'in_arbeit' %}selected{% endif %}>in_arbeit</option>
+      <option value="abgeschlossen" {% if status_filter == 'abgeschlossen' %}selected{% endif %}>abgeschlossen</option>
+      <option value="notiz" {% if status_filter == 'notiz' %}selected{% endif %}>notiz</option>
+      <option value="bugfix" {% if status_filter == 'bugfix' %}selected{% endif %}>bugfix</option>
+    </select>
+
+    <label for="since">Zeitraum</label>
+    <select id="since" name="since">
+      <option value="24h" {% if since_filter == '24h' %}selected{% endif %}>24h</option>
+      <option value="7d" {% if since_filter == '7d' %}selected{% endif %}>7d</option>
+      <option value="30d" {% if since_filter == '30d' %}selected{% endif %}>30d</option>
+      <option value="all" {% if since_filter == 'all' %}selected{% endif %}>alle</option>
+    </select>
+
+    <button type="submit">Suchen</button>
+    {% if query %}
+      <a href="{{ url_for('global_search') }}">Zuruecksetzen</a>
+    {% endif %}
+  </form>
+
+  {% if search_error %}
+    <p class="alert" role="alert">{{ search_error }}</p>
+  {% endif %}
+
+  <section class="entry-section" aria-labelledby="results-title">
+    <h2 id="results-title">{% if query %}Treffer{% else %}Noch keine Suche gestartet{% endif %}</h2>
+    <div class="entry-list">
+      {% for entry in entries %}
+        <article class="entry" id="entry-{{ entry.id }}">
+          <header>
+            <div>
+              <a href="{{ url_for('project_detail', project=entry.project) }}">{{ entry.project }}</a>
+              {% if entry.title %}<h3>{{ entry.title }}</h3>{% endif %}
+              <p class="entry-status">
+                {{ entry.status.value }}{% if entry.phase %} - {{ entry.phase }}{% endif %}
+              </p>
+            </div>
+            <time datetime="{{ entry.timestamp_iso() }}" title="{{ entry.timestamp_iso() }}">
+              {{ entry.timestamp|admin_datetime }}
+            </time>
+          </header>
+          <p class="entry-content">{{ entry.content }}</p>
+        </article>
+      {% else %}
+        {% if query %}
+          <p class="empty-state">Keine passenden Eintraege.</p>
+        {% else %}
+          <p class="empty-state">Starte eine Suche mit Query und optionalen Filtern.</p>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </section>
+{% endblock %}

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -98,6 +98,12 @@ class TestAdminApp:
 
         assert response.status_code == 303
         assert response.headers["location"] == "/login?next=/"
+
+    def test_global_search_requires_login(self, admin_client: TestClient) -> None:
+        response = admin_client.get("/search", follow_redirects=False)
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/login?next=/search"
 
     def test_successful_login_sets_hardened_cookie(
         self, admin_client: TestClient
@@ -243,6 +249,82 @@ class TestAdminApp:
         assert "Suchergebnisse" in response.text
         assert "read-only dashboard entry" in response.text
         assert len(db.read("bramble", n=10)) == before
+
+    def test_global_search_finds_cross_project_hits(
+        self, admin_client: TestClient, db: JournalDB
+    ) -> None:
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                title="Deploy note",
+                content="sharedneedle deployment bramble",
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.BUGFIX,
+                content="sharedneedle deployment elder",
+            )
+        )
+        _login(admin_client)
+
+        response = admin_client.get("/search?q=sharedneedle")
+
+        assert response.status_code == 200
+        assert "Globale Suche" in response.text
+        assert "sharedneedle deployment bramble" in response.text
+        assert "sharedneedle deployment elder" in response.text
+
+    def test_global_search_applies_status_and_since_filters(
+        self, admin_client: TestClient, db: JournalDB
+    ) -> None:
+        now = datetime.now(tz=UTC)
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.BUGFIX,
+                content="filteredterm recent bugfix",
+                timestamp=now - timedelta(hours=2),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.BUGFIX,
+                content="filteredterm old bugfix",
+                timestamp=now - timedelta(days=40),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="filteredterm recent notiz",
+                timestamp=now - timedelta(hours=1),
+            )
+        )
+        _login(admin_client)
+
+        response = admin_client.get(
+            "/search?q=filteredterm&status=bugfix&since=7d"
+        )
+
+        assert response.status_code == 200
+        assert "filteredterm recent bugfix" in response.text
+        assert "filteredterm old bugfix" not in response.text
+        assert "filteredterm recent notiz" not in response.text
+
+    def test_global_search_rejects_invalid_filter_values(
+        self, admin_client: TestClient
+    ) -> None:
+        _login(admin_client)
+
+        response = admin_client.get("/search?q=anything&status=bad&since=7d")
+
+        assert response.status_code == 200
+        assert "Ungueltiger Filterwert." in response.text
 
     def test_project_view_renders_context_panel(
         self, admin_client: TestClient, db: JournalDB

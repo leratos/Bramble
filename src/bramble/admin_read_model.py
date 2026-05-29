@@ -111,6 +111,39 @@ class AdminReadModel:
         except sqlite3.OperationalError:
             return []
 
+    def search_global(
+        self,
+        query: str,
+        *,
+        status: str | None = None,
+        since: str = "30d",
+        limit: int = 80,
+        now: datetime | None = None,
+    ) -> list[JournalEntry]:
+        """Search entries across projects with optional status/time filters."""
+
+        if now is None:
+            now = datetime.now(tz=UTC)
+        if now.tzinfo is None or now.tzinfo.utcoffset(now) is None:
+            raise ValueError("now must be timezone-aware")
+        now = now.astimezone(UTC)
+
+        status_filter: tuple[str, ...] | None = None
+        if status is not None and status != "all":
+            if status not in {"in_arbeit", "abgeschlossen", "notiz", "bugfix"}:
+                raise ValueError("status filter is invalid")
+            status_filter = (status,)
+
+        cutoff = _search_since_cutoff(since, now=now)
+        entries = self._db.search_all(
+            query=query,
+            limit=limit,
+            statuses=status_filter,
+        )
+        if cutoff is None:
+            return entries
+        return [entry for entry in entries if entry.timestamp >= cutoff]
+
     def project_context(
         self,
         project: str,
@@ -327,3 +360,15 @@ def _parse_optional_timestamp(value: str | None) -> datetime | None:
     if ts.tzinfo is None:
         return ts.replace(tzinfo=UTC)
     return ts
+
+
+def _search_since_cutoff(since: str, *, now: datetime) -> datetime | None:
+    if since == "all":
+        return None
+    if since == "24h":
+        return now - timedelta(hours=24)
+    if since == "7d":
+        return now - timedelta(days=7)
+    if since == "30d":
+        return now - timedelta(days=30)
+    raise ValueError("since filter is invalid")

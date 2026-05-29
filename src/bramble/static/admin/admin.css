@@ -37,7 +37,8 @@ a:hover {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -63,7 +64,8 @@ button.danger:hover {
   background: #6f1f1f;
 }
 
-input {
+input,
+select {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -72,6 +74,7 @@ input {
 }
 
 input:focus,
+select:focus,
 button:focus,
 a:focus {
   outline: 3px solid color-mix(in srgb, var(--focus) 35%, transparent);

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from bramble.admin_read_model import AdminReadModel
 from bramble.journal_db import JournalDB
 from bramble.journal_entry import JournalEntry, JournalEntryLink, JournalStatus
@@ -164,6 +166,48 @@ def test_project_context_returns_local_curated_context(db: JournalDB) -> None:
     assert [entry.content for entry in context.open_items] == ["open local task"]
     assert [entry.content for entry in context.recent_bugfixes] == ["local bugfix"]
     assert context.related_projects == ()
+
+
+def test_search_global_filters_by_status_and_since(db: JournalDB) -> None:
+    now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
+    db.append(
+        JournalEntry(
+            project="bramble",
+            status=JournalStatus.BUGFIX,
+            content="needle new bugfix",
+            timestamp=now - timedelta(hours=3),
+        )
+    )
+    db.append(
+        JournalEntry(
+            project="elder-berry",
+            status=JournalStatus.BUGFIX,
+            content="needle old bugfix",
+            timestamp=now - timedelta(days=50),
+        )
+    )
+    db.append(
+        JournalEntry(
+            project="bramble",
+            status=JournalStatus.NOTIZ,
+            content="needle new notiz",
+            timestamp=now - timedelta(hours=2),
+        )
+    )
+
+    hits = AdminReadModel(db).search_global(
+        "needle",
+        status="bugfix",
+        since="7d",
+        now=now,
+    )
+
+    assert [entry.content for entry in hits] == ["needle new bugfix"]
+
+
+def test_search_global_rejects_invalid_since(db: JournalDB) -> None:
+    with pytest.raises(ValueError):
+        AdminReadModel(db).search_global("needle", since="1y")
 
 
 def test_workflow_guidance_returns_phase_4e_defaults(db: JournalDB) -> None:
