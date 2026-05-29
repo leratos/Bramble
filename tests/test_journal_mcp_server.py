@@ -141,6 +141,9 @@ class TestEntryToDict:
             "phase": "Phase 2",
             "title": "Title",
             "content": "body",
+            "actor": None,
+            "client": None,
+            "source": None,
         }
 
 
@@ -192,6 +195,9 @@ class TestJournalRead:
                 "phase",
                 "title",
                 "content",
+                "actor",
+                "client",
+                "source",
             }
 
     async def test_respects_n_argument(
@@ -259,6 +265,9 @@ class TestJournalAppend:
         assert result.data["content"] == "kickoff entry"
         assert result.data["phase"] is None
         assert result.data["title"] is None
+        assert result.data["actor"] is None
+        assert result.data["client"] is None
+        assert result.data["source"] == "mcp"
 
     async def test_optional_fields_are_persisted(
         self, server: JournalMCPServer, db: JournalDB
@@ -278,6 +287,30 @@ class TestJournalAppend:
         assert stored.phase == "Phase 1"
         assert stored.title == "Closeout"
         assert stored.status is JournalStatus.ABGESCHLOSSEN
+
+    async def test_metadata_fields_are_persisted(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_append",
+                {
+                    "project": "bramble",
+                    "status": "notiz",
+                    "content": "metadata",
+                    "actor": "codex",
+                    "client": "codex-desktop",
+                    "source": "agent",
+                },
+            )
+
+        [stored] = db.read("bramble")
+        assert stored.actor == "codex"
+        assert stored.client == "codex-desktop"
+        assert stored.source == "agent"
+        assert result.data["actor"] == "codex"
+        assert result.data["client"] == "codex-desktop"
+        assert result.data["source"] == "agent"
 
     async def test_timestamp_is_server_set(
         self, server: JournalMCPServer
@@ -464,6 +497,22 @@ class TestJournalListProjects:
         assert by_name["bramble"]["last_timestamp"] == "2026-05-12T08:05:00+00:00"
         assert by_name["elder-berry"]["entry_count"] == 1
         assert by_name["elder-berry"]["last_timestamp"] == "2026-05-12T08:10:00+00:00"
+
+    async def test_registered_empty_project_has_null_timestamp(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        db.register_project("berry-gym")
+
+        async with Client(server.app) as client:
+            result = await client.call_tool("journal_list_projects", {})
+
+        assert result.data == [
+            {
+                "project": "berry-gym",
+                "entry_count": 0,
+                "last_timestamp": None,
+            }
+        ]
 
 
 # ---------------------------------------------------------------------------

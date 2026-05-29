@@ -28,6 +28,7 @@ from bramble.journal_mcp_server import JournalMCPServer
 from bramble.logging_setup import configure_logging
 from bramble.rate_limiter import RateLimiter
 from bramble.server_config import ServerConfig
+from bramble.token_store import load_token_map
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ def main() -> None:
         server = JournalMCPServer(db)
         server.run(transport="stdio")
     else:
+        db.register_projects(load_token_map(config.tokens_file).keys())
         auth_validator = AuthValidator(config.tokens_file)
         rate_limiter = RateLimiter(
             per_token_rpm=config.rate_limit_per_token,

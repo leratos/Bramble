@@ -54,6 +54,7 @@ _PHASE_RE = re.compile(
     r"\bPhase[- ](?P<number>\d+(?:[a-z]|(?:\.[0-9a-z]+))?)\b",
     re.IGNORECASE,
 )
+_IMPORT_CLIENT = "import_journal_txt.py"
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +77,8 @@ class ParsedJournalEntry:
             content=self.content,
             phase=self.phase,
             title=self.title,
+            client=_IMPORT_CLIENT,
+            source="import",
             timestamp=self.timestamp,
         )
 

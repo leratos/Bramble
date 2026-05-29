@@ -146,6 +146,29 @@ class TestAdminApp:
         assert "2026-05-28 22:41 CEST" in response.text
         assert ">2026-05-28T20:41:44.656494+00:00</time>" not in response.text
 
+    def test_dashboard_shows_entry_metadata(
+        self, admin_client: TestClient, db: JournalDB
+    ) -> None:
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                title="Metadata",
+                content="metadata display check",
+                actor="codex",
+                client="codex-desktop",
+                source="mcp",
+            )
+        )
+        _login(admin_client)
+
+        response = admin_client.get("/")
+
+        assert response.status_code == 200
+        assert "codex" in response.text
+        assert "codex-desktop" in response.text
+        assert "mcp" in response.text
+
     def test_project_view_searches_without_writing(
         self, admin_client: TestClient, db: JournalDB
     ) -> None:
@@ -208,6 +231,41 @@ class TestAdminApp:
         assert "elder-berry" in response.text
         assert "tok-bramble" not in response.text
 
+    def test_token_project_without_entries_is_visible(
+        self, tmp_path: Path
+    ) -> None:
+        db = JournalDB(tmp_path / "empty-token-project.db")
+        db.initialize()
+        tokens_file = tmp_path / "secrets" / "tokens.json"
+        write_token_map(tokens_file, {"berry-gym": "tok-berry"})
+        app = create_admin_app(
+            db,
+            _FakeAuthenticator(),  # type: ignore[arg-type]
+            config=AdminConfig(
+                db_path=db.db_path,
+                tokens_file=tokens_file,
+                allowed_hosts=("testserver",),
+            ),
+            sessions=SessionStore(
+                idle_seconds=1800,
+                absolute_seconds=28800,
+                token_factory=lambda: "token-project-session",
+                csrf_token_factory=lambda: "test-csrf",
+            ),
+            token_store=TokenStore(tokens_file),
+        )
+        client = TestClient(app)
+        _login(client)
+
+        dashboard = client.get("/")
+        detail = client.get("/projects/berry-gym")
+
+        assert dashboard.status_code == 200
+        assert "berry-gym" in dashboard.text
+        assert detail.status_code == 200
+        assert "0 Eintraege" in detail.text
+        assert "Noch keine Journal-Eintraege." in detail.text
+
     def test_token_create_requires_csrf(self, admin_client: TestClient) -> None:
         _login(admin_client)
 
@@ -240,6 +298,7 @@ class TestAdminApp:
         assert event.target == "berry-gym"
         assert event.result == "success"
         assert "generated-token" not in str(event.details)
+        assert "0 Eintraege" in response.text
 
     def test_token_rotate_replaces_only_target(
         self, admin_client: TestClient

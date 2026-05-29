@@ -28,6 +28,7 @@ def main() -> None:
         )
 
     db = JournalDB(config.db_path)
+    db.initialize()
     authenticator = AdminAuthenticator(config.admin_secret_file)
     app = create_admin_app(db, authenticator, config=config)
 

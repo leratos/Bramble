@@ -48,6 +48,12 @@ class TestProjectSummaryConstruction:
         summary = ProjectSummary(name="b", entry_count=1, last_timestamp=ts)
         assert summary.last_timestamp_iso() == "2026-05-12T09:00:00+00:00"
 
+    def test_empty_project_allows_zero_count_and_no_timestamp(self) -> None:
+        summary = ProjectSummary(name="empty-project", entry_count=0)
+        assert summary.entry_count == 0
+        assert summary.last_timestamp is None
+        assert summary.last_timestamp_iso() is None
+
     def test_summary_is_frozen(self) -> None:
         summary = ProjectSummary(
             name="bramble",
@@ -96,12 +102,11 @@ class TestProjectSummaryValidation:
                 last_timestamp=datetime.now(tz=UTC),
             )
 
-    @pytest.mark.parametrize("bad", [0, -1])
-    def test_rejects_non_positive_entry_count(self, bad: int) -> None:
+    def test_rejects_negative_entry_count(self) -> None:
         with pytest.raises(ValueError):
             ProjectSummary(
                 name="b",
-                entry_count=bad,
+                entry_count=-1,
                 last_timestamp=datetime.now(tz=UTC),
             )
 

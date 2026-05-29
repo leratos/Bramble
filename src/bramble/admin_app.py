@@ -72,6 +72,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 @dataclass(frozen=True, slots=True)
 class _AdminContext:
+    db: JournalDB
     config: AdminConfig
     authenticator: AdminAuthenticator
     sessions: SessionStore
@@ -116,6 +117,7 @@ def create_admin_app(
     )
     read_model = read_model or AdminReadModel(db)
     token_store = token_store or TokenStore(config.tokens_file)
+    _sync_token_projects(db, token_store)
     audit_log = audit_log or AdminAuditLog(db)
     audit_log.initialize()
     templates = Jinja2Templates(directory=str(templates_dir))
@@ -158,6 +160,7 @@ def create_admin_app(
     ]
     app = Starlette(debug=False, routes=routes)
     app.state.admin = _AdminContext(
+        db=db,
         config=config,
         authenticator=authenticator,
         sessions=sessions,
@@ -282,6 +285,7 @@ async def token_create(request: Request) -> Response:
 
     project = form.get("project", "")
     try:
+        _ctx(request).db.register_project(project)
         mutation = _ctx(request).token_store.create(project)
     except (OSError, TypeError, ValueError) as exc:
         _audit(
@@ -321,6 +325,7 @@ async def token_rotate(request: Request) -> Response:
 
     try:
         mutation = _ctx(request).token_store.rotate(project)
+        _ctx(request).db.register_project(project)
     except (OSError, ValueError) as exc:
         _audit(
             request,
@@ -506,6 +511,14 @@ def _render_tokens(
         },
         status_code=token_status_code,
     )
+
+
+def _sync_token_projects(db: JournalDB, token_store: TokenStore) -> None:
+    try:
+        token_projects = [summary.project for summary in token_store.list_tokens()]
+    except (OSError, ValueError):
+        return
+    db.register_projects(token_projects)
 
 
 def _render(

@@ -52,6 +52,13 @@
           <p class="entry-status">
             {{ entry.status.value }}{% if entry.phase %} - {{ entry.phase }}{% endif %}
           </p>
+          {% if entry.actor or entry.client or entry.source %}
+            <p class="entry-status">
+              {% if entry.actor %}{{ entry.actor }}{% endif %}
+              {% if entry.client %}{% if entry.actor %} - {% endif %}{{ entry.client }}{% endif %}
+              {% if entry.source %}{% if entry.actor or entry.client %} - {% endif %}{{ entry.source }}{% endif %}
+            </p>
+          {% endif %}
           <p class="entry-content">{{ entry.content }}</p>
         </article>
       {% else %}

@@ -9,13 +9,17 @@
       <h1 id="project-title">{{ summary.name }}</h1>
       <p>
         {{ summary.entry_count }} Eintraege -
-        letzter Eintrag
-        <time
-          datetime="{{ summary.last_timestamp_iso() }}"
-          title="{{ summary.last_timestamp_iso() }}"
-        >
-          {{ summary.last_timestamp|admin_datetime }}
-        </time>
+        {% if summary.last_timestamp %}
+          letzter Eintrag
+          <time
+            datetime="{{ summary.last_timestamp_iso() }}"
+            title="{{ summary.last_timestamp_iso() }}"
+          >
+            {{ summary.last_timestamp|admin_datetime }}
+          </time>
+        {% else %}
+          noch keine Eintraege
+        {% endif %}
       </p>
     </div>
   </section>
@@ -48,6 +52,13 @@
               <p class="entry-status">
                 {{ entry.status.value }}{% if entry.phase %} - {{ entry.phase }}{% endif %}
               </p>
+              {% if entry.actor or entry.client or entry.source %}
+                <p class="entry-status">
+                  {% if entry.actor %}{{ entry.actor }}{% endif %}
+                  {% if entry.client %}{% if entry.actor %} - {% endif %}{{ entry.client }}{% endif %}
+                  {% if entry.source %}{% if entry.actor or entry.client %} - {% endif %}{{ entry.source }}{% endif %}
+                </p>
+              {% endif %}
             </div>
             <time datetime="{{ entry.timestamp_iso() }}" title="{{ entry.timestamp_iso() }}">
               {{ entry.timestamp|admin_datetime }}
@@ -56,7 +67,11 @@
           <p class="entry-content">{{ entry.content }}</p>
         </article>
       {% else %}
-        <p class="empty-state">Keine passenden Eintraege.</p>
+        {% if query %}
+          <p class="empty-state">Keine passenden Eintraege.</p>
+        {% else %}
+          <p class="empty-state">Noch keine Journal-Eintraege.</p>
+        {% endif %}
       {% endfor %}
     </div>
   </section>

@@ -37,12 +37,18 @@ class TestJournalEntryConstruction:
             content="kickoff",
             phase="Phase 1",
             title="Start",
+            actor="codex",
+            client="codex-desktop",
+            source="mcp",
             timestamp=ts,
         )
 
         assert entry.project == "elder-berry"
         assert entry.phase == "Phase 1"
         assert entry.title == "Start"
+        assert entry.actor == "codex"
+        assert entry.client == "codex-desktop"
+        assert entry.source == "mcp"
         assert entry.timestamp == ts
         assert entry.timestamp_iso() == "2026-05-12T08:30:00+00:00"
 
@@ -158,6 +164,19 @@ class TestJournalEntryValidation:
         )
         assert entry.phase == "Phase 1"
 
+    def test_metadata_is_stripped_and_empty_metadata_becomes_none(self) -> None:
+        entry = JournalEntry(
+            project="bramble",
+            status=JournalStatus.NOTIZ,
+            content="x",
+            actor="  codex  ",
+            client="   ",
+            source="\n",
+        )
+        assert entry.actor == "codex"
+        assert entry.client is None
+        assert entry.source is None
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -194,9 +213,15 @@ class TestJournalEntryHelpers:
             phase=None,
             title=None,
             content="x",
+            actor="codex",
+            client="codex-desktop",
+            source="mcp",
         )
         assert entry.id == 1
         assert entry.status is JournalStatus.NOTIZ
+        assert entry.actor == "codex"
+        assert entry.client == "codex-desktop"
+        assert entry.source == "mcp"
         assert entry.timestamp == datetime(2026, 5, 12, 8, 30, tzinfo=UTC)
 
     def test_from_row_assumes_utc_for_naive_legacy_rows(self) -> None:
@@ -209,6 +234,9 @@ class TestJournalEntryHelpers:
             phase=None,
             title=None,
             content="x",
+            actor=None,
+            client=None,
+            source=None,
         )
         assert entry.timestamp.tzinfo is not None
         assert entry.timestamp.utcoffset() == timedelta(0)

@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from bramble import __main__ as cli
+from bramble.journal_db import JournalDB
 from bramble.journal_mcp_server import JournalMCPServer
 from bramble.server_config import (
     ENV_DB_PATH,
@@ -118,6 +119,10 @@ class TestMainWiring:
             "host": "127.0.0.1",
             "port": 9100,
         }
+        [summary] = JournalDB(db_path).project_overview()
+        assert summary.name == "bramble"
+        assert summary.entry_count == 0
+        assert summary.last_timestamp is None
 
     def test_http_wires_auth_and_rate_limiter(
         self,

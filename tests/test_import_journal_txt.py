@@ -366,6 +366,8 @@ def test_execute_imports_entries_and_skips_duplicates(tmp_path: Path) -> None:
         "Phase 1 - Repo-Setup",
         "Lazy Import",
     }
+    assert {entry.client for entry in entries} == {"import_journal_txt.py"}
+    assert {entry.source for entry in entries} == {"import"}
 
 
 def test_bad_project_returns_error(tmp_path: Path) -> None:

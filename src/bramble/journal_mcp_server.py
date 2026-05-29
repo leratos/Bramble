@@ -89,7 +89,16 @@ def _entry_to_dict(entry: JournalEntry) -> dict[str, Any]:
         "phase": entry.phase,
         "title": entry.title,
         "content": entry.content,
+        "actor": entry.actor,
+        "client": entry.client,
+        "source": entry.source,
     }
+
+
+def _mcp_source(source: str | None) -> str:
+    if source is None or not source.strip():
+        return "mcp"
+    return source
 
 
 def _enforce_project_scope(project: str) -> None:
@@ -321,6 +330,9 @@ class JournalMCPServer:
             content: str,
             phase: str | None = None,
             title: str | None = None,
+            actor: str | None = None,
+            client: str | None = None,
+            source: str | None = None,
         ) -> dict[str, Any]:
             """Append a new journal entry and return it with its assigned id.
 
@@ -349,6 +361,9 @@ class JournalMCPServer:
                 content=content,
                 phase=phase,
                 title=title,
+                actor=actor,
+                client=client,
+                source=_mcp_source(source),
             )
             persisted = await asyncio.to_thread(db.append, entry)
             return _entry_to_dict(persisted)

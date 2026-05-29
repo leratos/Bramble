@@ -48,3 +48,24 @@ def test_dashboard_stats_count_recent_windows(db: JournalDB) -> None:
         "this week",
         "older",
     ]
+
+
+def test_projects_include_registered_project_without_entries(db: JournalDB) -> None:
+    db.register_project("berry-gym")
+
+    projects = AdminReadModel(db).projects()
+
+    assert [(project.name, project.entry_count) for project in projects] == [
+        ("berry-gym", 0)
+    ]
+
+
+def test_dashboard_project_count_uses_registry(db: JournalDB) -> None:
+    db.register_project("berry-gym")
+
+    stats = AdminReadModel(db).dashboard_stats(
+        now=datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
+    )
+
+    assert stats.project_count == 1
+    assert stats.total_entries == 0

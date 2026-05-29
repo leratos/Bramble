@@ -36,11 +36,26 @@ from bramble.project_summary import ProjectSummary
 
 logger = logging.getLogger(__name__)
 
+_PROJECT_STATUSES = {"active", "paused", "archived"}
+
 
 # ---------------------------------------------------------------------------
 # Schema definition
 # ---------------------------------------------------------------------------
 _SCHEMA_STATEMENTS: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS projects (
+        name          TEXT PRIMARY KEY,
+        display_name  TEXT,
+        description   TEXT,
+        status        TEXT NOT NULL DEFAULT 'active'
+                      CHECK (status IN ('active', 'paused', 'archived')),
+        default_phase TEXT,
+        created_at    TEXT NOT NULL,
+        updated_at    TEXT NOT NULL,
+        archived_at   TEXT
+    )
+    """,
     """
     CREATE TABLE IF NOT EXISTS journal_entries (
         id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,7 +64,10 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
         status    TEXT NOT NULL,
         phase     TEXT,
         title     TEXT,
-        content   TEXT NOT NULL
+        content   TEXT NOT NULL,
+        actor     TEXT,
+        client    TEXT,
+        source    TEXT
     )
     """,
     """
@@ -145,6 +163,8 @@ class JournalDB:
                 )
             for statement in _SCHEMA_STATEMENTS:
                 conn.execute(statement)
+            _migrate_journal_entry_metadata_columns(conn)
+            _migrate_projects_from_entries(conn)
             conn.commit()
         logger.info("JournalDB initialised at %s (journal_mode=%s)", self._db_path, mode)
 
@@ -168,8 +188,8 @@ class JournalDB:
 
         sql = (
             "INSERT INTO journal_entries "
-            "(project, timestamp, status, phase, title, content) "
-            "VALUES (?, ?, ?, ?, ?, ?)"
+            "(project, timestamp, status, phase, title, content, actor, client, source) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         params = (
             entry.project,
@@ -178,9 +198,13 @@ class JournalDB:
             entry.phase,
             entry.title,
             entry.content,
+            entry.actor,
+            entry.client,
+            entry.source,
         )
 
         with self._connect() as conn:
+            _upsert_project_for_entry(conn, entry.project, entry.timestamp_iso())
             cursor = conn.execute(sql, params)
             conn.commit()
             new_id = cursor.lastrowid
@@ -191,6 +215,77 @@ class JournalDB:
             raise RuntimeError("sqlite did not return a lastrowid")
 
         return entry.with_id(new_id)
+
+    def register_project(
+        self,
+        name: str,
+        *,
+        display_name: str | None = None,
+        description: str | None = None,
+        status: str = "active",
+        default_phase: str | None = None,
+    ) -> None:
+        """Ensure a project exists in the registry without adding entries."""
+
+        self._validate_project_arg(name)
+        name = name.strip()
+        display_name = _normalise_optional_text(display_name, "display_name")
+        description = _normalise_optional_text(description, "description")
+        default_phase = _normalise_optional_text(default_phase, "default_phase")
+        if status not in _PROJECT_STATUSES:
+            allowed = ", ".join(sorted(_PROJECT_STATUSES))
+            raise ValueError(
+                f"status {status!r} is not allowed; must be one of: {allowed}"
+            )
+
+        now = datetime.now(tz=UTC).isoformat()
+        archived_at = now if status == "archived" else None
+        sql = (
+            "INSERT OR IGNORE INTO projects "
+            "(name, display_name, description, status, default_phase, "
+            " created_at, updated_at, archived_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        params = (
+            name,
+            display_name,
+            description,
+            status,
+            default_phase,
+            now,
+            now,
+            archived_at,
+        )
+        with self._connect() as conn:
+            conn.execute(sql, params)
+            conn.commit()
+
+    def register_projects(self, names: object) -> None:
+        """Ensure multiple project names exist in the registry."""
+
+        if isinstance(names, (str, bytes)):
+            raise TypeError("names must be an iterable of project strings")
+        try:
+            iterator = iter(names)  # type: ignore[arg-type]
+        except TypeError as exc:
+            raise TypeError("names must be an iterable of project strings") from exc
+
+        project_names: list[str] = []
+        for name in iterator:
+            self._validate_project_arg(name)
+            project_names.append(name.strip())
+        if not project_names:
+            return
+
+        now = datetime.now(tz=UTC).isoformat()
+        rows = [(name, now, now) for name in sorted(set(project_names))]
+        with self._connect() as conn:
+            conn.executemany(
+                "INSERT OR IGNORE INTO projects "
+                "(name, created_at, updated_at) VALUES (?, ?, ?)",
+                rows,
+            )
+            conn.commit()
 
     # ------------------------------------------------------------------
     # Queries
@@ -205,7 +300,8 @@ class JournalDB:
         self._validate_limit_arg(n, name="n")
 
         sql = (
-            "SELECT id, project, timestamp, status, phase, title, content "
+            "SELECT id, project, timestamp, status, phase, title, content, "
+            "       actor, client, source "
             "FROM journal_entries "
             "WHERE project = ? "
             "ORDER BY timestamp DESC, id DESC "
@@ -240,7 +336,8 @@ class JournalDB:
 
         sql = (
             "SELECT je.id, je.project, je.timestamp, je.status, "
-            "       je.phase, je.title, je.content "
+            "       je.phase, je.title, je.content, "
+            "       je.actor, je.client, je.source "
             "FROM journal_fts "
             "JOIN journal_entries je ON je.id = journal_fts.rowid "
             "WHERE journal_fts MATCH ? AND je.project = ? "
@@ -264,11 +361,9 @@ class JournalDB:
     def project_overview(self) -> list[ProjectSummary]:
         """Return one :class:`ProjectSummary` per project, newest activity first.
 
-        For each distinct ``project`` in :class:`JournalEntry` storage,
-        the summary contains the entry count and the most recent
-        timestamp. Projects with zero entries are not listed (they
-        cannot exist, since insertion is the only way to create a
-        project).
+        For each project in the registry, the summary contains the
+        entry count and the most recent timestamp. Projects with zero
+        entries are listed with ``last_timestamp=None``.
 
         Ordering: descending by ``last_timestamp``. Ties – which can
         legitimately occur when two entries share a timestamp string –
@@ -280,21 +375,24 @@ class JournalDB:
         # lexicographically the same way the underlying datetimes do.
         # ``JournalEntry`` enforces UTC, so this MAX/ORDER BY is safe.
         sql = (
-            "SELECT project, COUNT(*) AS entry_count, "
-            "       MAX(timestamp) AS last_ts "
-            "FROM journal_entries "
-            "GROUP BY project "
-            "ORDER BY last_ts DESC, project ASC"
+            "WITH entry_stats AS ("
+            "    SELECT project, COUNT(*) AS entry_count, MAX(timestamp) AS last_ts "
+            "    FROM journal_entries "
+            "    GROUP BY project "
+            ") "
+            "SELECT p.name AS project, "
+            "       COALESCE(es.entry_count, 0) AS entry_count, "
+            "       es.last_ts AS last_ts "
+            "FROM projects p "
+            "LEFT JOIN entry_stats es ON es.project = p.name "
+            "ORDER BY es.last_ts IS NULL ASC, es.last_ts DESC, p.name ASC"
         )
         with self._connect() as conn:
             rows = conn.execute(sql).fetchall()
 
         summaries: list[ProjectSummary] = []
         for row in rows:
-            ts = datetime.fromisoformat(row["last_ts"])
-            if ts.tzinfo is None:
-                # Defensive: legacy rows might be naive. Treat as UTC.
-                ts = ts.replace(tzinfo=UTC)
+            ts = _parse_optional_timestamp(row["last_ts"])
             summaries.append(
                 ProjectSummary(
                     name=row["project"],
@@ -332,6 +430,9 @@ class JournalDB:
             phase=row["phase"],
             title=row["title"],
             content=row["content"],
+            actor=row["actor"],
+            client=row["client"],
+            source=row["source"],
         )
 
     @staticmethod
@@ -348,3 +449,67 @@ class JournalDB:
             raise TypeError(f"{name} must be an int")
         if value <= 0:
             raise ValueError(f"{name} must be positive")
+
+
+def _migrate_projects_from_entries(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO projects (name, created_at, updated_at)
+        SELECT project, MIN(timestamp), MAX(timestamp)
+        FROM journal_entries
+        GROUP BY project
+        """
+    )
+
+
+def _migrate_journal_entry_metadata_columns(conn: sqlite3.Connection) -> None:
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(journal_entries)").fetchall()
+    }
+    for column in ("actor", "client", "source"):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE journal_entries ADD COLUMN {column} TEXT")
+
+
+def _upsert_project_for_entry(
+    conn: sqlite3.Connection,
+    project: str,
+    timestamp: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO projects (name, created_at, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(name) DO UPDATE SET
+            created_at = CASE
+                WHEN excluded.created_at < projects.created_at
+                THEN excluded.created_at
+                ELSE projects.created_at
+            END,
+            updated_at = CASE
+                WHEN excluded.updated_at > projects.updated_at
+                THEN excluded.updated_at
+                ELSE projects.updated_at
+            END
+        """,
+        (project, timestamp, timestamp),
+    )
+
+
+def _parse_optional_timestamp(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    ts = datetime.fromisoformat(value)
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=UTC)
+    return ts
+
+
+def _normalise_optional_text(value: str | None, name: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must be a string or None")
+    value = value.strip()
+    return value or None

@@ -72,6 +72,87 @@ class TestJournalDBInit:
             mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
         assert str(mode).lower() == "wal"
 
+    def test_initialize_migrates_existing_entry_projects_to_registry(
+        self, db_path: Path
+    ) -> None:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE journal_entries (
+                    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project   TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    status    TEXT NOT NULL,
+                    phase     TEXT,
+                    title     TEXT,
+                    content   TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO journal_entries
+                    (project, timestamp, status, phase, title, content)
+                VALUES
+                    ('bramble', '2026-05-12T08:00:00+00:00', 'notiz', NULL, NULL, 'b1'),
+                    ('bramble', '2026-05-12T08:05:00+00:00', 'notiz', NULL, NULL, 'b2'),
+                    ('elder-berry', '2026-05-12T08:10:00+00:00', 'notiz', NULL, NULL, 'e1')
+                """
+            )
+            conn.commit()
+
+        db = JournalDB(db_path)
+        db.initialize()
+
+        overview = {summary.name: summary for summary in db.project_overview()}
+        assert set(overview) == {"bramble", "elder-berry"}
+        assert overview["bramble"].entry_count == 2
+        assert overview["bramble"].last_timestamp == datetime(
+            2026, 5, 12, 8, 5, tzinfo=UTC
+        )
+        assert overview["elder-berry"].entry_count == 1
+
+    def test_initialize_adds_metadata_columns_to_legacy_entries_table(
+        self, db_path: Path
+    ) -> None:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE journal_entries (
+                    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project   TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    status    TEXT NOT NULL,
+                    phase     TEXT,
+                    title     TEXT,
+                    content   TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO journal_entries
+                    (project, timestamp, status, phase, title, content)
+                VALUES
+                    ('bramble', '2026-05-12T08:00:00+00:00', 'notiz', NULL, NULL, 'legacy')
+                """
+            )
+            conn.commit()
+
+        db = JournalDB(db_path)
+        db.initialize()
+
+        with sqlite3.connect(db_path) as conn:
+            columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(journal_entries)")
+            }
+        [entry] = db.read("bramble")
+        assert {"actor", "client", "source"} <= columns
+        assert entry.actor is None
+        assert entry.client is None
+        assert entry.source is None
+
 
 # ---------------------------------------------------------------------------
 # append()
@@ -96,6 +177,14 @@ class TestAppend:
     def test_append_rejects_non_entry(self, db: JournalDB) -> None:
         with pytest.raises(TypeError):
             db.append("not an entry")  # type: ignore[arg-type]
+
+    def test_append_registers_project(self, db: JournalDB) -> None:
+        db.append(_entry(project="berry-gym"))
+        with sqlite3.connect(db.db_path) as conn:
+            row = conn.execute(
+                "SELECT name, status FROM projects WHERE name = 'berry-gym'"
+            ).fetchone()
+        assert row == ("berry-gym", "active")
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +310,15 @@ class TestProjectOverview:
     def test_empty_db_returns_empty_list(self, db: JournalDB) -> None:
         assert db.project_overview() == []
 
+    def test_registered_project_without_entries_is_listed(self, db: JournalDB) -> None:
+        db.register_project("berry-gym")
+
+        [summary] = db.project_overview()
+        assert summary.name == "berry-gym"
+        assert summary.entry_count == 0
+        assert summary.last_timestamp is None
+        assert summary.last_timestamp_iso() is None
+
     def test_counts_and_last_timestamp_per_project(self, db: JournalDB) -> None:
         base = datetime(2026, 5, 12, 8, 0, tzinfo=UTC)
         db.append(_entry(project="bramble", content="b1", timestamp=base))
@@ -278,6 +376,7 @@ class TestProjectOverview:
         db.append(_entry(project="bramble", content="x", timestamp=ts))
         [summary] = db.project_overview()
         assert isinstance(summary, ProjectSummary)
+        assert summary.last_timestamp is not None
         assert summary.last_timestamp.tzinfo is not None
         assert summary.last_timestamp.utcoffset() == timedelta(0)
 
@@ -306,3 +405,20 @@ class TestRoundTrip:
         assert restored.phase == "Phase 2"
         assert restored.title == "Done"
         assert restored.timestamp == ts
+
+    def test_metadata_fields_survive_round_trip(self, db: JournalDB) -> None:
+        original = JournalEntry(
+            project="bramble",
+            status=JournalStatus.NOTIZ,
+            content="metadata payload",
+            actor="codex",
+            client="codex-desktop",
+            source="mcp",
+        )
+        db.append(original)
+
+        [restored] = db.read("bramble")
+
+        assert restored.actor == "codex"
+        assert restored.client == "codex-desktop"
+        assert restored.source == "mcp"

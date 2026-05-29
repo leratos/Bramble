@@ -63,6 +63,13 @@ class JournalEntry:
         Optional phase label (e.g. ``"Phase 1"``).
     title:
         Optional short title.
+    actor:
+        Optional human or agent acting on the work, for audit context.
+    client:
+        Optional technical client identifier.
+    source:
+        Optional broad origin such as ``"mcp"``, ``"admin-ui"``, or
+        ``"import"``. This is metadata only, not an auth source.
     timestamp:
         Timezone-aware ``datetime`` in UTC. Defaults to "now".
     id:
@@ -74,6 +81,9 @@ class JournalEntry:
     content: str
     phase: str | None = None
     title: str | None = None
+    actor: str | None = None
+    client: str | None = None
+    source: str | None = None
     timestamp: datetime = field(default_factory=_utc_now)
     id: int | None = None
 
@@ -85,6 +95,9 @@ class JournalEntry:
         self._validate_content()
         self._validate_optional_text("phase")
         self._validate_optional_text("title")
+        self._validate_optional_text("actor")
+        self._validate_optional_text("client")
+        self._validate_optional_text("source")
         self._validate_timestamp()
 
     # ------------------------------------------------------------------
@@ -178,6 +191,9 @@ class JournalEntry:
             content=self.content,
             phase=self.phase,
             title=self.title,
+            actor=self.actor,
+            client=self.client,
+            source=self.source,
             timestamp=self.timestamp,
             id=new_id,
         )
@@ -193,6 +209,9 @@ class JournalEntry:
         phase: str | None,
         title: str | None,
         content: str,
+        actor: str | None = None,
+        client: str | None = None,
+        source: str | None = None,
     ) -> JournalEntry:
         """Build an entry from a DB row.
 
@@ -210,6 +229,9 @@ class JournalEntry:
             content=content,
             phase=phase,
             title=title,
+            actor=actor,
+            client=client,
+            source=source,
             timestamp=ts,
             id=id,
         )

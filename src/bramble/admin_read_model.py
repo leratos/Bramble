@@ -34,20 +34,24 @@ class AdminReadModel:
 
     def projects(self) -> list[ProjectSummary]:
         sql = (
-            "SELECT project, COUNT(*) AS entry_count, "
-            "       MAX(timestamp) AS last_ts "
-            "FROM journal_entries "
-            "GROUP BY project "
-            "ORDER BY last_ts DESC, project ASC"
+            "WITH entry_stats AS ("
+            "    SELECT project, COUNT(*) AS entry_count, MAX(timestamp) AS last_ts "
+            "    FROM journal_entries "
+            "    GROUP BY project "
+            ") "
+            "SELECT p.name AS project, "
+            "       COALESCE(es.entry_count, 0) AS entry_count, "
+            "       es.last_ts AS last_ts "
+            "FROM projects p "
+            "LEFT JOIN entry_stats es ON es.project = p.name "
+            "ORDER BY es.last_ts IS NULL ASC, es.last_ts DESC, p.name ASC"
         )
         with closing(self._connect()) as conn:
             rows = conn.execute(sql).fetchall()
 
         projects: list[ProjectSummary] = []
         for row in rows:
-            ts = datetime.fromisoformat(row["last_ts"])
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=UTC)
+            ts = _parse_optional_timestamp(row["last_ts"])
             projects.append(
                 ProjectSummary(
                     name=row["project"],
@@ -59,7 +63,8 @@ class AdminReadModel:
 
     def project_entries(self, project: str, *, limit: int = 80) -> list[JournalEntry]:
         sql = (
-            "SELECT id, project, timestamp, status, phase, title, content "
+            "SELECT id, project, timestamp, status, phase, title, content, "
+            "       actor, client, source "
             "FROM journal_entries "
             "WHERE project = ? "
             "ORDER BY timestamp DESC, id DESC "
@@ -78,7 +83,8 @@ class AdminReadModel:
     ) -> list[JournalEntry]:
         sql = (
             "SELECT je.id, je.project, je.timestamp, je.status, "
-            "       je.phase, je.title, je.content "
+            "       je.phase, je.title, je.content, "
+            "       je.actor, je.client, je.source "
             "FROM journal_fts "
             "JOIN journal_entries je ON je.id = journal_fts.rowid "
             "WHERE journal_fts MATCH ? AND je.project = ? "
@@ -134,7 +140,8 @@ def _count_entries_since(conn: sqlite3.Connection, since: datetime) -> int:
 
 def _recent_entries(conn: sqlite3.Connection, *, limit: int) -> list[JournalEntry]:
     sql = (
-        "SELECT id, project, timestamp, status, phase, title, content "
+        "SELECT id, project, timestamp, status, phase, title, content, "
+        "       actor, client, source "
         "FROM journal_entries "
         "ORDER BY timestamp DESC, id DESC "
         "LIMIT ?"
@@ -152,4 +159,16 @@ def _row_to_entry(row: sqlite3.Row) -> JournalEntry:
         phase=row["phase"],
         title=row["title"],
         content=row["content"],
+        actor=row["actor"],
+        client=row["client"],
+        source=row["source"],
     )
+
+
+def _parse_optional_timestamp(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    ts = datetime.fromisoformat(value)
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=UTC)
+    return ts
