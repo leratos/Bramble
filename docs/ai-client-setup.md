@@ -8,7 +8,7 @@ Clients.
 KI-Clients sollen Bramble als gemeinsames Entwicklungsjournal nutzen:
 
 * alte Einträge lesen,
-* projektbezogen suchen,
+* projektbezogen oder projektuebergreifend suchen,
 * neue Einträge schreiben,
 * Korrekturen nachvollziehbar ergänzen.
 
@@ -60,6 +60,7 @@ Der Client sollte nach erfolgreicher Verbindung diese Tools sehen:
 | `journal_read(project, n=80)` | Letzte Einträge eines Projekts lesen |
 | `journal_append(project, status, content, phase=None, title=None)` | Neuen Eintrag schreiben |
 | `journal_search(project, query, limit=20)` | Volltextsuche in einem Projekt |
+| `journal_search_all(query, limit=20, projects=None, statuses=None, tags=None)` | Volltextsuche ueber alle Projekte mit optionalen Filtern |
 | `journal_list_projects()` | Projekte mit Counts und letzter Aktivität listen |
 
 `journal_append` ist an das Projekt des Tokens gebunden. Ein
@@ -73,6 +74,7 @@ Zu Beginn einer Bramble-Session:
 1. `journal_read(project="bramble", n=20)` aufrufen.
 2. Bei unklarer Historie gezielt suchen, z. B.
    `journal_search(project="bramble", query="Phase 4", limit=10)`.
+   Wenn das relevante Projekt unklar ist, `journal_search_all(...)` nutzen.
 3. Die gelesenen Einträge bei Planung und Statusantworten berücksichtigen.
 
 Während der Arbeit:
@@ -150,7 +152,8 @@ Nutze Bramble als projektbezogenes Entwicklungsjournal.
 Projekt: bramble
 
 Zu Beginn relevanter Arbeit rufe journal_read(project="bramble", n=20)
-auf. Suche bei Bedarf mit journal_search(project="bramble", query=...).
+auf. Suche bei Bedarf mit journal_search(project="bramble", query=...)
+oder projektuebergreifend mit journal_search_all(query=...).
 Schreibe am Ende substanzieller Arbeit einen journal_append-Eintrag.
 Bestehende Einträge werden nicht geändert; Korrekturen erfolgen als neue
 bugfix- oder notiz-Einträge, die den alten Eintrag referenzieren.
@@ -159,7 +162,7 @@ Nutze nur Statuswerte: in_arbeit, abgeschlossen, notiz, bugfix.
 
 ## Verifikation eines neuen Clients
 
-1. Tool-Liste prüfen: alle vier Bramble-Tools müssen sichtbar sein.
+1. Tool-Liste prüfen: alle fuenf Bramble-Tools müssen sichtbar sein.
 2. Lesen testen:
 
 ```text
@@ -172,7 +175,13 @@ journal_read(project="bramble", n=5)
 journal_search(project="bramble", query="Backup", limit=5)
 ```
 
-4. Schreibtest nur als echten Journal-Eintrag ausführen, nicht als
+4. Projektuebergreifende Suche testen:
+
+```text
+journal_search_all(query="Backup", limit=5)
+```
+
+5. Schreibtest nur als echten Journal-Eintrag ausführen, nicht als
    beliebigen Smoke-Eintrag. Beispiel: `title="Client <name> angebunden"`.
 
 Wenn ein Schreibtest fehlschlägt, zuerst prüfen:

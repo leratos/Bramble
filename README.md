@@ -64,7 +64,7 @@ synchronisiert über drei Trigger (insert/update/delete).
 
 ### MCP-Tools
 
-Vier Tools auf dem `JournalMCPServer`, jedes mit `ToolError`-konformer
+Fuenf Tools auf dem `JournalMCPServer`, jedes mit `ToolError`-konformer
 Fehlerübersetzung:
 
 | Tool | Zweck |
@@ -72,6 +72,7 @@ Fehlerübersetzung:
 | `journal_read(project, n=80)` | Neueste `n` Einträge für ein Projekt, neueste zuerst |
 | `journal_append(project, status, content, phase=None, title=None)` | Neuen Eintrag schreiben; Timestamp wird serverseitig gesetzt |
 | `journal_search(project, query, limit=20)` | FTS5-Volltextsuche, MATCH-Syntax durchgereicht |
+| `journal_search_all(query, limit=20, projects=None, statuses=None, tags=None)` | Projektuebergreifende FTS5-Suche mit optionalen Filtern, maximal 100 Treffer |
 | `journal_list_projects()` | `(project, entry_count, last_timestamp)` pro Projekt, neueste Aktivität zuerst |
 
 Projekt-Identifier müssen im MCP-Layer kebab-case sein
@@ -189,7 +190,7 @@ die DB getrennt vom Server-Lifecycle angelegt werden soll.
 
 ## Manuelles End-to-End-Smoke-Testen
 
-`scripts/smoke_http.py` prüft alle vier MCP-Tools gegen einen real
+`scripts/smoke_http.py` prüft die MCP-Tools gegen einen real
 laufenden HTTP-Server (kein Teil der pytest-Suite).
 
 ```powershell

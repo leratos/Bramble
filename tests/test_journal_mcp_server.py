@@ -163,6 +163,7 @@ class TestToolRegistry:
             "journal_list_projects",
             "journal_read",
             "journal_search",
+            "journal_search_all",
         ]
 
 
@@ -526,6 +527,126 @@ class TestJournalSearch:
                 await client.call_tool(
                     "journal_search",
                     {"project": "bramble", "query": "x", "limit": 0},
+                )
+
+
+# ---------------------------------------------------------------------------
+# journal_search_all
+# ---------------------------------------------------------------------------
+class TestJournalSearchAll:
+    async def test_happy_path_finds_matches_across_projects(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        base = datetime(2026, 5, 12, 8, 0, tzinfo=UTC)
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="deployment keyword in bramble",
+                timestamp=base,
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.BUGFIX,
+                content="deployment keyword in elder",
+                timestamp=base + timedelta(minutes=1),
+                tags=["deploy"],
+            )
+        )
+
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_search_all",
+                {"query": "deployment"},
+            )
+
+        assert [row["project"] for row in result.data] == ["elder-berry", "bramble"]
+        assert set(result.data[0]) == {
+            "id",
+            "project",
+            "timestamp",
+            "status",
+            "phase",
+            "title",
+            "content",
+            "actor",
+            "client",
+            "source",
+            "tags",
+            "links",
+            "backlinks",
+        }
+
+    async def test_filters_projects_statuses_and_tags(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="release keyword",
+                tags=["deploy"],
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.BUGFIX,
+                content="release keyword",
+                tags=["deploy", "hotfix"],
+            )
+        )
+
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_search_all",
+                {
+                    "query": "release",
+                    "projects": ["elder-berry"],
+                    "statuses": ["bugfix"],
+                    "tags": ["Deploy", "hotfix"],
+                },
+            )
+
+        assert len(result.data) == 1
+        assert result.data[0]["project"] == "elder-berry"
+        assert result.data[0]["tags"] == ["deploy", "hotfix"]
+
+    async def test_malformed_fts5_returns_empty_list(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        db.append(
+            JournalEntry(
+                project="bramble", status=JournalStatus.NOTIZ, content="something"
+            )
+        )
+
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_search_all",
+                {"query": '"open quote'},
+            )
+
+        assert result.data == []
+
+    async def test_rejects_non_kebab_case_project_filter(
+        self, server: JournalMCPServer
+    ) -> None:
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="kebab-case"):
+                await client.call_tool(
+                    "journal_search_all",
+                    {"query": "x", "projects": ["Bad"]},
+                )
+
+    async def test_rejects_limit_above_cap(self, server: JournalMCPServer) -> None:
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="at most 100"):
+                await client.call_tool(
+                    "journal_search_all",
+                    {"query": "x", "limit": 101},
                 )
 
 

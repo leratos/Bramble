@@ -324,6 +324,92 @@ class TestSearch:
 
 
 # ---------------------------------------------------------------------------
+# search_all()
+# ---------------------------------------------------------------------------
+class TestSearchAll:
+    def test_search_all_finds_matches_across_projects(self, db: JournalDB) -> None:
+        base = datetime(2026, 5, 12, 8, 0, tzinfo=UTC)
+        db.append(
+            _entry(
+                project="bramble",
+                content="deployment keyword in bramble",
+                timestamp=base,
+            )
+        )
+        db.append(
+            _entry(
+                project="elder-berry",
+                content="deployment keyword in elder",
+                timestamp=base + timedelta(minutes=1),
+            )
+        )
+        db.append(_entry(project="berry-gym", content="unrelated"))
+
+        hits = db.search_all("deployment")
+
+        assert [entry.project for entry in hits] == ["elder-berry", "bramble"]
+
+    def test_search_all_filters_projects(self, db: JournalDB) -> None:
+        db.append(_entry(project="bramble", content="needle in bramble"))
+        db.append(_entry(project="elder-berry", content="needle in elder"))
+
+        hits = db.search_all("needle", projects=["bramble"])
+
+        assert [entry.project for entry in hits] == ["bramble"]
+
+    def test_search_all_filters_statuses_and_tags(self, db: JournalDB) -> None:
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="release keyword",
+                tags=["deploy"],
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.BUGFIX,
+                content="release keyword",
+                tags=["deploy", "hotfix"],
+            )
+        )
+
+        hits = db.search_all(
+            "release",
+            statuses=[JournalStatus.BUGFIX],
+            tags=["Deploy", "hotfix"],
+        )
+
+        assert len(hits) == 1
+        assert hits[0].project == "elder-berry"
+        assert hits[0].tags == ("deploy", "hotfix")
+
+    def test_search_all_respects_limit(self, db: JournalDB) -> None:
+        for i in range(5):
+            db.append(_entry(project=f"project-{i}", content=f"keyword {i}"))
+
+        assert len(db.search_all("keyword", limit=2)) == 2
+
+    def test_search_all_caps_limit(self, db: JournalDB) -> None:
+        with pytest.raises(ValueError, match="at most 100"):
+            db.search_all("keyword", limit=101)
+
+    def test_search_all_returns_empty_on_bad_fts_syntax(self, db: JournalDB) -> None:
+        db.append(_entry(content="something"))
+
+        assert db.search_all('"open quote') == []
+
+    def test_search_all_rejects_empty_query(self, db: JournalDB) -> None:
+        with pytest.raises(ValueError):
+            db.search_all("   ")
+
+    def test_search_all_rejects_invalid_status_filter(self, db: JournalDB) -> None:
+        with pytest.raises(ValueError, match="status"):
+            db.search_all("keyword", statuses=["done"])
+
+
+# ---------------------------------------------------------------------------
 # project_overview()
 # ---------------------------------------------------------------------------
 class TestProjectOverview:
