@@ -23,9 +23,13 @@ Design notes (Phase 1, see ``docs/journal.txt``):
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+
+_TAG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+_MAX_TAGS = 5
 
 
 class JournalStatus(StrEnum):
@@ -70,6 +74,9 @@ class JournalEntry:
     source:
         Optional broad origin such as ``"mcp"``, ``"admin-ui"``, or
         ``"import"``. This is metadata only, not an auth source.
+    tags:
+        Optional lowercase kebab-case labels. Duplicates are removed
+        and at most five tags are allowed.
     timestamp:
         Timezone-aware ``datetime`` in UTC. Defaults to "now".
     id:
@@ -84,6 +91,7 @@ class JournalEntry:
     actor: str | None = None
     client: str | None = None
     source: str | None = None
+    tags: tuple[str, ...] = field(default_factory=tuple)
     timestamp: datetime = field(default_factory=_utc_now)
     id: int | None = None
 
@@ -98,6 +106,7 @@ class JournalEntry:
         self._validate_optional_text("actor")
         self._validate_optional_text("client")
         self._validate_optional_text("source")
+        self._validate_tags()
         self._validate_timestamp()
 
     # ------------------------------------------------------------------
@@ -154,6 +163,36 @@ class JournalEntry:
         if stripped != value:
             object.__setattr__(self, attr, stripped)
 
+    def _validate_tags(self) -> None:
+        if self.tags is None:
+            object.__setattr__(self, "tags", ())
+            return
+        if isinstance(self.tags, (str, bytes)):
+            raise TypeError("tags must be an iterable of strings, not a string")
+
+        try:
+            iterator = iter(self.tags)
+        except TypeError as exc:
+            raise TypeError("tags must be an iterable of strings") from exc
+
+        normalised: set[str] = set()
+        for tag in iterator:
+            if not isinstance(tag, str):
+                raise TypeError("tags must contain only strings")
+            tag = tag.strip().lower()
+            if not tag:
+                raise ValueError("tags must not contain empty values")
+            if not _TAG_RE.fullmatch(tag):
+                raise ValueError(
+                    f"tag {tag!r} must match kebab-case pattern "
+                    "^[a-z0-9][a-z0-9-]*$"
+                )
+            normalised.add(tag)
+
+        if len(normalised) > _MAX_TAGS:
+            raise ValueError(f"entries may have at most {_MAX_TAGS} tags")
+        object.__setattr__(self, "tags", tuple(sorted(normalised)))
+
     def _validate_timestamp(self) -> None:
         if not isinstance(self.timestamp, datetime):
             raise TypeError("timestamp must be a datetime")
@@ -194,6 +233,7 @@ class JournalEntry:
             actor=self.actor,
             client=self.client,
             source=self.source,
+            tags=self.tags,
             timestamp=self.timestamp,
             id=new_id,
         )
@@ -212,6 +252,7 @@ class JournalEntry:
         actor: str | None = None,
         client: str | None = None,
         source: str | None = None,
+        tags: tuple[str, ...] = (),
     ) -> JournalEntry:
         """Build an entry from a DB row.
 
@@ -232,6 +273,7 @@ class JournalEntry:
             actor=actor,
             client=client,
             source=source,
+            tags=tags,
             timestamp=ts,
             id=id,
         )

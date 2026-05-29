@@ -92,6 +92,7 @@ def _entry_to_dict(entry: JournalEntry) -> dict[str, Any]:
         "actor": entry.actor,
         "client": entry.client,
         "source": entry.source,
+        "tags": list(entry.tags),
     }
 
 
@@ -330,6 +331,7 @@ class JournalMCPServer:
             content: str,
             phase: str | None = None,
             title: str | None = None,
+            tags: list[str] | None = None,
             actor: str | None = None,
             client: str | None = None,
             source: str | None = None,
@@ -364,6 +366,7 @@ class JournalMCPServer:
                 actor=actor,
                 client=client,
                 source=_mcp_source(source),
+                tags=tags or (),
             )
             persisted = await asyncio.to_thread(db.append, entry)
             return _entry_to_dict(persisted)

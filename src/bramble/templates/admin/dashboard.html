@@ -59,6 +59,13 @@
               {% if entry.source %}{% if entry.actor or entry.client %} - {% endif %}{{ entry.source }}{% endif %}
             </p>
           {% endif %}
+          {% if entry.tags %}
+            <div class="chip-list" aria-label="Tags">
+              {% for tag in entry.tags %}
+                <span>{{ tag }}</span>
+              {% endfor %}
+            </div>
+          {% endif %}
           <p class="entry-content">{{ entry.content }}</p>
         </article>
       {% else %}

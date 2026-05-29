@@ -40,6 +40,7 @@ class TestJournalEntryConstruction:
             actor="codex",
             client="codex-desktop",
             source="mcp",
+            tags=["test", "Admin-UI", "test"],
             timestamp=ts,
         )
 
@@ -49,6 +50,7 @@ class TestJournalEntryConstruction:
         assert entry.actor == "codex"
         assert entry.client == "codex-desktop"
         assert entry.source == "mcp"
+        assert entry.tags == ("admin-ui", "test")
         assert entry.timestamp == ts
         assert entry.timestamp_iso() == "2026-05-12T08:30:00+00:00"
 
@@ -177,6 +179,24 @@ class TestJournalEntryValidation:
         assert entry.client is None
         assert entry.source is None
 
+    def test_rejects_invalid_tags(self) -> None:
+        with pytest.raises(ValueError, match="kebab-case"):
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="x",
+                tags=["bad_tag"],
+            )
+
+    def test_rejects_more_than_five_tags(self) -> None:
+        with pytest.raises(ValueError, match="at most 5"):
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="x",
+                tags=["one", "two", "three", "four", "five", "six"],
+            )
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -216,12 +236,14 @@ class TestJournalEntryHelpers:
             actor="codex",
             client="codex-desktop",
             source="mcp",
+            tags=("admin-ui", "test"),
         )
         assert entry.id == 1
         assert entry.status is JournalStatus.NOTIZ
         assert entry.actor == "codex"
         assert entry.client == "codex-desktop"
         assert entry.source == "mcp"
+        assert entry.tags == ("admin-ui", "test")
         assert entry.timestamp == datetime(2026, 5, 12, 8, 30, tzinfo=UTC)
 
     def test_from_row_assumes_utc_for_naive_legacy_rows(self) -> None:

@@ -71,6 +71,19 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS journal_tags (
+        name        TEXT PRIMARY KEY,
+        created_at  TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS journal_entry_tags (
+        entry_id  INTEGER NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+        tag       TEXT NOT NULL REFERENCES journal_tags(name),
+        PRIMARY KEY (entry_id, tag)
+    )
+    """,
+    """
     CREATE INDEX IF NOT EXISTS idx_project_ts
         ON journal_entries(project, timestamp DESC)
     """,
@@ -206,13 +219,13 @@ class JournalDB:
         with self._connect() as conn:
             _upsert_project_for_entry(conn, entry.project, entry.timestamp_iso())
             cursor = conn.execute(sql, params)
-            conn.commit()
             new_id = cursor.lastrowid
-
-        if new_id is None or new_id <= 0:
-            # This should not happen with AUTOINCREMENT, but be loud
-            # if SQLite ever surprises us.
-            raise RuntimeError("sqlite did not return a lastrowid")
+            if new_id is None or new_id <= 0:
+                # This should not happen with AUTOINCREMENT, but be loud
+                # if SQLite ever surprises us.
+                raise RuntimeError("sqlite did not return a lastrowid")
+            _insert_entry_tags(conn, new_id, entry.tags, entry.timestamp_iso())
+            conn.commit()
 
         return entry.with_id(new_id)
 
@@ -309,7 +322,7 @@ class JournalDB:
         )
         with self._connect() as conn:
             rows = conn.execute(sql, (project, n)).fetchall()
-        return [self._row_to_entry(row) for row in rows]
+            return self._rows_to_entries(conn, rows)
 
     def search(
         self,
@@ -347,6 +360,7 @@ class JournalDB:
         try:
             with self._connect() as conn:
                 rows = conn.execute(sql, (query, project, limit)).fetchall()
+                return self._rows_to_entries(conn, rows)
         except sqlite3.OperationalError as exc:
             # Bad FTS5 syntax from the caller. Don't crash the server.
             logger.warning(
@@ -356,7 +370,6 @@ class JournalDB:
                 exc,
             )
             return []
-        return [self._row_to_entry(row) for row in rows]
 
     def project_overview(self) -> list[ProjectSummary]:
         """Return one :class:`ProjectSummary` per project, newest activity first.
@@ -421,7 +434,22 @@ class JournalDB:
             conn.close()
 
     @staticmethod
-    def _row_to_entry(row: sqlite3.Row) -> JournalEntry:
+    def _rows_to_entries(
+        conn: sqlite3.Connection,
+        rows: list[sqlite3.Row],
+    ) -> list[JournalEntry]:
+        tags_by_entry_id = _tags_by_entry_id(conn, [row["id"] for row in rows])
+        return [
+            JournalDB._row_to_entry(row, tags=tags_by_entry_id.get(row["id"], ()))
+            for row in rows
+        ]
+
+    @staticmethod
+    def _row_to_entry(
+        row: sqlite3.Row,
+        *,
+        tags: tuple[str, ...] = (),
+    ) -> JournalEntry:
         return JournalEntry.from_row(
             id=row["id"],
             project=row["project"],
@@ -433,6 +461,7 @@ class JournalDB:
             actor=row["actor"],
             client=row["client"],
             source=row["source"],
+            tags=tags,
         )
 
     @staticmethod
@@ -470,6 +499,46 @@ def _migrate_journal_entry_metadata_columns(conn: sqlite3.Connection) -> None:
     for column in ("actor", "client", "source"):
         if column not in columns:
             conn.execute(f"ALTER TABLE journal_entries ADD COLUMN {column} TEXT")
+
+
+def _insert_entry_tags(
+    conn: sqlite3.Connection,
+    entry_id: int,
+    tags: tuple[str, ...],
+    timestamp: str,
+) -> None:
+    if not tags:
+        return
+    conn.executemany(
+        "INSERT OR IGNORE INTO journal_tags (name, created_at) VALUES (?, ?)",
+        [(tag, timestamp) for tag in tags],
+    )
+    conn.executemany(
+        "INSERT INTO journal_entry_tags (entry_id, tag) VALUES (?, ?)",
+        [(entry_id, tag) for tag in tags],
+    )
+
+
+def _tags_by_entry_id(
+    conn: sqlite3.Connection,
+    entry_ids: list[int],
+) -> dict[int, tuple[str, ...]]:
+    if not entry_ids:
+        return {}
+    placeholders = ",".join("?" for _ in entry_ids)
+    rows = conn.execute(
+        f"""
+        SELECT entry_id, tag
+        FROM journal_entry_tags
+        WHERE entry_id IN ({placeholders})
+        ORDER BY tag ASC
+        """,
+        entry_ids,
+    ).fetchall()
+    tag_map: dict[int, list[str]] = {}
+    for row in rows:
+        tag_map.setdefault(row["entry_id"], []).append(row["tag"])
+    return {entry_id: tuple(tags) for entry_id, tags in tag_map.items()}
 
 
 def _upsert_project_for_entry(

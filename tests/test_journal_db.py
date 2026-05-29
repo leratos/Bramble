@@ -153,6 +153,16 @@ class TestJournalDBInit:
         assert entry.client is None
         assert entry.source is None
 
+    def test_initialize_creates_tag_tables(self, db: JournalDB) -> None:
+        with sqlite3.connect(db.db_path) as conn:
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+        assert {"journal_tags", "journal_entry_tags"} <= tables
+
 
 # ---------------------------------------------------------------------------
 # append()
@@ -422,3 +432,25 @@ class TestRoundTrip:
         assert restored.actor == "codex"
         assert restored.client == "codex-desktop"
         assert restored.source == "mcp"
+
+    def test_tags_survive_round_trip(self, db: JournalDB) -> None:
+        original = JournalEntry(
+            project="bramble",
+            status=JournalStatus.NOTIZ,
+            content="tagged payload",
+            tags=["test", "admin-ui", "test"],
+        )
+        persisted = db.append(original)
+
+        [restored] = db.read("bramble")
+        hits = db.search("bramble", "tagged")
+
+        assert restored.id == persisted.id
+        assert restored.tags == ("admin-ui", "test")
+        assert hits[0].tags == ("admin-ui", "test")
+        with sqlite3.connect(db.db_path) as conn:
+            stored_tags = {
+                row[0]
+                for row in conn.execute("SELECT name FROM journal_tags")
+            }
+        assert stored_tags == {"admin-ui", "test"}

@@ -72,7 +72,7 @@ class AdminReadModel:
         )
         with closing(self._connect()) as conn:
             rows = conn.execute(sql, (project, limit)).fetchall()
-        return [_row_to_entry(row) for row in rows]
+            return _rows_to_entries(conn, rows)
 
     def search_project(
         self,
@@ -94,9 +94,9 @@ class AdminReadModel:
         try:
             with closing(self._connect()) as conn:
                 rows = conn.execute(sql, (query, project, limit)).fetchall()
+                return _rows_to_entries(conn, rows)
         except sqlite3.OperationalError:
             return []
-        return [_row_to_entry(row) for row in rows]
 
     def dashboard_stats(self, *, now: datetime | None = None) -> DashboardStats:
         if now is None:
@@ -147,10 +147,25 @@ def _recent_entries(conn: sqlite3.Connection, *, limit: int) -> list[JournalEntr
         "LIMIT ?"
     )
     rows = conn.execute(sql, (limit,)).fetchall()
-    return [_row_to_entry(row) for row in rows]
+    return _rows_to_entries(conn, rows)
 
 
-def _row_to_entry(row: sqlite3.Row) -> JournalEntry:
+def _rows_to_entries(
+    conn: sqlite3.Connection,
+    rows: list[sqlite3.Row],
+) -> list[JournalEntry]:
+    tags_by_entry_id = _tags_by_entry_id(conn, [row["id"] for row in rows])
+    return [
+        _row_to_entry(row, tags=tags_by_entry_id.get(row["id"], ()))
+        for row in rows
+    ]
+
+
+def _row_to_entry(
+    row: sqlite3.Row,
+    *,
+    tags: tuple[str, ...] = (),
+) -> JournalEntry:
     return JournalEntry.from_row(
         id=row["id"],
         project=row["project"],
@@ -162,7 +177,30 @@ def _row_to_entry(row: sqlite3.Row) -> JournalEntry:
         actor=row["actor"],
         client=row["client"],
         source=row["source"],
+        tags=tags,
     )
+
+
+def _tags_by_entry_id(
+    conn: sqlite3.Connection,
+    entry_ids: list[int],
+) -> dict[int, tuple[str, ...]]:
+    if not entry_ids:
+        return {}
+    placeholders = ",".join("?" for _ in entry_ids)
+    rows = conn.execute(
+        f"""
+        SELECT entry_id, tag
+        FROM journal_entry_tags
+        WHERE entry_id IN ({placeholders})
+        ORDER BY tag ASC
+        """,
+        entry_ids,
+    ).fetchall()
+    tag_map: dict[int, list[str]] = {}
+    for row in rows:
+        tag_map.setdefault(row["entry_id"], []).append(row["tag"])
+    return {entry_id: tuple(tags) for entry_id, tags in tag_map.items()}
 
 
 def _parse_optional_timestamp(value: str | None) -> datetime | None:

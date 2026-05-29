@@ -158,6 +158,7 @@ class TestAdminApp:
                 actor="codex",
                 client="codex-desktop",
                 source="mcp",
+                tags=["admin-ui", "test"],
             )
         )
         _login(admin_client)
@@ -168,6 +169,8 @@ class TestAdminApp:
         assert "codex" in response.text
         assert "codex-desktop" in response.text
         assert "mcp" in response.text
+        assert "admin-ui" in response.text
+        assert "test" in response.text
 
     def test_project_view_searches_without_writing(
         self, admin_client: TestClient, db: JournalDB
