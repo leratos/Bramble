@@ -76,7 +76,7 @@
               <span class="entry-status-text">{{ entry.phase }}</span>
             {% endif %}
           </p>
-          <p class="entry-content">{{ entry.content }}</p>
+          <p class="entry-content">{{ entry.content|admin_text }}</p>
         </article>
       {% else %}
         <p class="empty-state">Keine offenen Punkte.</p>
@@ -159,7 +159,7 @@
               {% endfor %}
             </div>
           {% endif %}
-          <p class="entry-content">{{ entry.content }}</p>
+          <p class="entry-content">{{ entry.content|admin_text }}</p>
         </article>
       {% else %}
         <p class="empty-state">Noch keine Journal-Eintraege.</p>

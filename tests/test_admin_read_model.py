@@ -279,6 +279,20 @@ def test_search_global_filters_by_status_project_and_tags(db: JournalDB) -> None
     assert [entry.content for entry in hits] == ["needle alpha"]
 
 
+def test_project_entries_preserve_literal_backslash_n_text(db: JournalDB) -> None:
+    db.append(
+        JournalEntry(
+            project="bramble",
+            status=JournalStatus.NOTIZ,
+            content="first line\\nsecond line",
+        )
+    )
+
+    entries = AdminReadModel(db).project_entries("bramble")
+
+    assert entries[0].content == "first line\\nsecond line"
+
+
 def test_search_global_rejects_invalid_since(db: JournalDB) -> None:
     with pytest.raises(ValueError):
         AdminReadModel(db).search_global("needle", since="1y")

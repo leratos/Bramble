@@ -237,6 +237,27 @@ class TestAdminApp:
         assert "test" in response.text
         assert "corrects" in response.text
 
+    def test_dashboard_renders_literal_backslash_n_as_line_break(
+        self, admin_client: TestClient, db: JournalDB
+    ) -> None:
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="first line\\nsecond line\\n\\nthird line",
+            )
+        )
+        _login(admin_client)
+
+        response = admin_client.get("/")
+
+        assert response.status_code == 200
+        assert "first line" in response.text
+        assert "second line" in response.text
+        assert "third line" in response.text
+        assert "\\nsecond line" not in response.text
+        assert "\\n\\nthird line" not in response.text
+
     def test_project_view_searches_without_writing(
         self, admin_client: TestClient, db: JournalDB
     ) -> None:

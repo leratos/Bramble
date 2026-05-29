@@ -125,6 +125,7 @@ def create_admin_app(
     templates.env.filters["admin_datetime"] = (
         lambda value: format_display_datetime(value, display_tz)
     )
+    templates.env.filters["admin_text"] = _render_admin_text
 
     routes = [
         Route("/", dashboard, methods=["GET"], name="dashboard"),
@@ -759,3 +760,9 @@ def _project_rows(projects: list[ProjectSummary]) -> list[dict[str, object]]:
         }
         for project in projects
     ]
+
+
+def _render_admin_text(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    return value.replace("\\n", "\n")

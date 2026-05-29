@@ -83,7 +83,7 @@
               <span class="entry-status-text">{{ entry.phase }}</span>
             {% endif %}
           </p>
-          <p class="entry-content">{{ entry.content }}</p>
+          <p class="entry-content">{{ entry.content|admin_text }}</p>
         </article>
       {% else %}
         {% if query %}
