@@ -53,6 +53,7 @@ _DIGEST_RELATIVE_RANGES = {
     "30d": timedelta(days=30),
 }
 _OPEN_ITEMS_CLOSING_RE = re.compile(r"#(?P<open_id>\d+)\s*->\s*#\d+", re.IGNORECASE)
+_TITLE_BASE_SEPARATOR_RE = re.compile(r"\s+--+\s+")
 _DECISION_RE = re.compile(r"\b(decision|entscheidung|festgelegt)\b", re.IGNORECASE)
 _TAG_FILTER_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _CONTEXT_SUGGESTION_TERMS: tuple[str, ...] = (
@@ -624,8 +625,10 @@ class JournalDB:
         as closed via either:
 
         * an incoming closing link relation (``corrects``, ``supersedes``,
-          ``implements``), or
-        * a textual mapping in the newer entry content like ``#123 -> #124``.
+          ``implements``),
+        * a textual mapping in the newer entry content like ``#123 -> #124``,
+        * a newer entry with the same normalized phase, or
+        * a newer entry with the same normalized title or explicit base title.
         """
 
         self._validate_open_items_limit_arg(limit)
@@ -1295,8 +1298,7 @@ def _infer_closed_open_item_ids(
             continue
         if phase_key is not None:
             open_items_by_phase.setdefault(phase_key, []).append((int(row["id"]), ts))
-        title_key = _normalise_title_key(row["title"])
-        if title_key is not None:
+        for title_key in _normalise_title_keys(row["title"]):
             open_items_by_title.setdefault(title_key, []).append((int(row["id"]), ts))
 
     if open_items_by_phase or open_items_by_title:
@@ -1321,8 +1323,7 @@ def _infer_closed_open_item_ids(
                 prev_phase = latest_close_by_phase.get(phase_key)
                 if prev_phase is None or marker > prev_phase:
                     latest_close_by_phase[phase_key] = marker
-            title_key = _normalise_title_key(row["title"])
-            if title_key is not None:
+            for title_key in _normalise_title_keys(row["title"]):
                 prev_title = latest_close_by_title.get(title_key)
                 if prev_title is None or marker > prev_title:
                     latest_close_by_title[title_key] = marker
@@ -1361,6 +1362,19 @@ def _normalise_title_key(value: str | None) -> str | None:
     normalised = "".join(ch.lower() if ch.isalnum() else " " for ch in value)
     key = " ".join(normalised.split())
     return key or None
+
+
+def _normalise_title_keys(value: str | None) -> tuple[str, ...]:
+    full_key = _normalise_title_key(value)
+    if full_key is None or value is None:
+        return ()
+
+    keys = [full_key]
+    base_title = _TITLE_BASE_SEPARATOR_RE.split(value, maxsplit=1)[0]
+    base_key = _normalise_title_key(base_title)
+    if base_key is not None and len(base_key.split()) >= 3 and base_key not in keys:
+        keys.append(base_key)
+    return tuple(keys)
 
 
 def _context_suggested_searches(

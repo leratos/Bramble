@@ -921,6 +921,61 @@ class TestOpenItems:
         assert result == []
         assert open_entry.id is not None
 
+    def test_open_items_excludes_entries_closed_by_base_title(
+        self,
+        db: JournalDB,
+    ) -> None:
+        open_entry = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                title="Bugfix RPi5-Display-Rotation -- Saleria steht auf Kopf",
+                content="start",
+                timestamp=datetime(2026, 5, 1, 12, 0, tzinfo=UTC),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.ABGESCHLOSSEN,
+                title="Bugfix RPi5-Display-Rotation",
+                content="done",
+                timestamp=datetime(2026, 5, 1, 12, 0, tzinfo=UTC),
+            )
+        )
+
+        result = db.open_items(project="elder-berry", limit=10)
+
+        assert result == []
+        assert open_entry.id is not None
+
+    def test_open_items_keeps_entries_open_for_generic_base_title(
+        self,
+        db: JournalDB,
+    ) -> None:
+        open_entry = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                title="Hotfix -- Tower-Update + Self-Respawn",
+                content="start",
+                timestamp=datetime(2026, 5, 29, 12, 0, tzinfo=UTC),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.ABGESCHLOSSEN,
+                title="Hotfix",
+                content="done",
+                timestamp=datetime(2026, 5, 29, 12, 1, tzinfo=UTC),
+            )
+        )
+
+        result = db.open_items(project="elder-berry", limit=10)
+
+        assert [entry.id for entry in result] == [open_entry.id]
+
 
 # ---------------------------------------------------------------------------
 # context()
