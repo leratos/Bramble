@@ -677,6 +677,69 @@ class TestOpenItems:
         with pytest.raises(ValueError, match="positive"):
             db.open_items(limit=0)
 
+    def test_open_items_excludes_entries_closed_via_link_relation(
+        self,
+        db: JournalDB,
+    ) -> None:
+        open_entry = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                content="work in progress",
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.ABGESCHLOSSEN,
+                content="closed by explicit link",
+                links=(
+                    JournalEntryLink(
+                        entry_id=open_entry.id,
+                        relation="supersedes",
+                    ),
+                ),
+            )
+        )
+
+        result = db.open_items(project="elder-berry", limit=10)
+
+        assert result == []
+
+    def test_open_items_excludes_entries_closed_via_textual_id_mapping(
+        self,
+        db: JournalDB,
+    ) -> None:
+        open_a = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                content="slice A",
+            )
+        )
+        open_b = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                content="slice B",
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.NOTIZ,
+                content=(
+                    "Open-Items-Abgleich\n"
+                    f"- #{open_a.id} -> #999\n"
+                    "- #12345 -> #12346"
+                ),
+            )
+        )
+
+        result = db.open_items(project="elder-berry", limit=10)
+
+        assert [entry.id for entry in result] == [open_b.id]
+
 
 # ---------------------------------------------------------------------------
 # context()

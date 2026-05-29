@@ -52,6 +52,7 @@ _DIGEST_RELATIVE_RANGES = {
     "7d": timedelta(days=7),
     "30d": timedelta(days=30),
 }
+_OPEN_ITEMS_CLOSING_RE = re.compile(r"#(?P<open_id>\d+)\s*->\s*#\d+", re.IGNORECASE)
 _DECISION_RE = re.compile(r"\b(decision|entscheidung|festgelegt)\b", re.IGNORECASE)
 _TAG_FILTER_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _CONTEXT_SUGGESTION_TERMS: tuple[str, ...] = (
@@ -581,7 +582,16 @@ class JournalDB:
         project: str | None = None,
         limit: int = 50,
     ) -> list[JournalEntry]:
-        """Return newest open work items (``status='in_arbeit'``)."""
+        """Return newest actionable open work items.
+
+        Base set is ``status='in_arbeit'``. Entries are suppressed when a
+        newer non-``in_arbeit`` entry in the same project clearly marks them
+        as closed via either:
+
+        * an incoming closing link relation (``corrects``, ``supersedes``,
+          ``implements``), or
+        * a textual mapping in the newer entry content like ``#123 -> #124``.
+        """
 
         self._validate_open_items_limit_arg(limit)
         if project is not None:
@@ -605,7 +615,8 @@ class JournalDB:
         params.append(limit)
         with self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
-            return self._rows_to_entries(conn, rows)
+            entries = self._rows_to_entries(conn, rows)
+            return _filter_effectively_closed_open_items(conn, entries)
 
     def project_overview(self) -> list[ProjectSummary]:
         """Return one :class:`ProjectSummary` per project, newest activity first.
@@ -1141,6 +1152,96 @@ def _entry_is_decision(entry: JournalEntry) -> bool:
         _DECISION_RE.search(entry.title or "")
         or _DECISION_RE.search(entry.content)
     )
+
+
+def _filter_effectively_closed_open_items(
+    conn: sqlite3.Connection,
+    entries: list[JournalEntry],
+) -> list[JournalEntry]:
+    if not entries:
+        return entries
+
+    by_project: dict[str, list[JournalEntry]] = {}
+    for entry in entries:
+        by_project.setdefault(entry.project, []).append(entry)
+
+    filtered: list[JournalEntry] = []
+    for project, project_entries in by_project.items():
+        closed_ids = _infer_closed_open_item_ids(
+            conn,
+            project=project,
+            open_item_ids=[entry.id for entry in project_entries if entry.id is not None],
+        )
+        filtered.extend(
+            entry
+            for entry in project_entries
+            if entry.id is None or entry.id not in closed_ids
+        )
+
+    filtered.sort(key=lambda entry: (entry.timestamp, entry.id or 0), reverse=True)
+    return filtered
+
+
+def _infer_closed_open_item_ids(
+    conn: sqlite3.Connection,
+    *,
+    project: str,
+    open_item_ids: list[int],
+) -> set[int]:
+    if not open_item_ids:
+        return set()
+
+    placeholders = ",".join("?" for _ in open_item_ids)
+    closing_statuses = (
+        JournalStatus.ABGESCHLOSSEN.value,
+        JournalStatus.BUGFIX.value,
+        JournalStatus.NOTIZ.value,
+    )
+    status_placeholders = ",".join("?" for _ in closing_statuses)
+    rows = conn.execute(
+        f"""
+        SELECT id, content
+        FROM journal_entries
+        WHERE project = ?
+          AND status IN ({status_placeholders})
+          AND (
+                content LIKE '%#% -> #%'
+                OR EXISTS (
+                    SELECT 1
+                    FROM journal_entry_links l
+                    WHERE l.from_entry_id = journal_entries.id
+                      AND l.relation IN ('corrects', 'supersedes', 'implements')
+                      AND l.to_entry_id IN ({placeholders})
+                )
+          )
+        """,
+        [project, *closing_statuses, *open_item_ids],
+    ).fetchall()
+
+    closed_ids: set[int] = set()
+    for row in rows:
+        content = row["content"] or ""
+        for match in _OPEN_ITEMS_CLOSING_RE.finditer(content):
+            open_id = int(match.group("open_id"))
+            if open_id in open_item_ids:
+                closed_ids.add(open_id)
+
+    if rows:
+        link_rows = conn.execute(
+            f"""
+            SELECT l.to_entry_id
+            FROM journal_entry_links l
+            JOIN journal_entries je ON je.id = l.from_entry_id
+            WHERE je.project = ?
+              AND je.status IN ({status_placeholders})
+              AND l.relation IN ('corrects', 'supersedes', 'implements')
+              AND l.to_entry_id IN ({placeholders})
+            """,
+            [project, *closing_statuses, *open_item_ids],
+        ).fetchall()
+        closed_ids.update(int(row["to_entry_id"]) for row in link_rows)
+
+    return closed_ids
 
 
 def _context_suggested_searches(
