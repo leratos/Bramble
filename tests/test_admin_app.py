@@ -149,6 +149,13 @@ class TestAdminApp:
     def test_dashboard_shows_entry_metadata(
         self, admin_client: TestClient, db: JournalDB
     ) -> None:
+        old = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="old metadata display check",
+            )
+        )
         db.append(
             JournalEntry(
                 project="bramble",
@@ -159,6 +166,7 @@ class TestAdminApp:
                 client="codex-desktop",
                 source="mcp",
                 tags=["admin-ui", "test"],
+                links=[{"to_entry_id": old.id, "relation": "corrects"}],
             )
         )
         _login(admin_client)
@@ -171,6 +179,7 @@ class TestAdminApp:
         assert "mcp" in response.text
         assert "admin-ui" in response.text
         assert "test" in response.text
+        assert "corrects" in response.text
 
     def test_project_view_searches_without_writing(
         self, admin_client: TestClient, db: JournalDB

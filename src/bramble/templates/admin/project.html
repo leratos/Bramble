@@ -66,6 +66,20 @@
                   {% endfor %}
                 </div>
               {% endif %}
+              {% if entry.links %}
+                <div class="chip-list" aria-label="Links">
+                  {% for link in entry.links %}
+                    <span>{{ link.relation.value }} #{{ link.entry_id }}</span>
+                  {% endfor %}
+                </div>
+              {% endif %}
+              {% if entry.backlinks %}
+                <div class="chip-list" aria-label="Backlinks">
+                  {% for link in entry.backlinks %}
+                    <span>{{ link.relation.value }} from #{{ link.entry_id }}</span>
+                  {% endfor %}
+                </div>
+              {% endif %}
             </div>
             <time datetime="{{ entry.timestamp_iso() }}" title="{{ entry.timestamp_iso() }}">
               {{ entry.timestamp|admin_datetime }}
