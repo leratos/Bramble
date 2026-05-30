@@ -1378,7 +1378,9 @@ class TestContext:
         assert isinstance(context, JournalContext)
         assert context.project == "bramble"
         assert len(context.recent) == 2
-        assert [entry.status.value for entry in context.open_items] == ["in_arbeit"]
+        assert [view.entry.status.value for view in context.open_items] == [
+            "in_arbeit"
+        ]
         assert [entry.status.value for entry in context.recent_bugfixes] == ["bugfix"]
         assert [entry.title for entry in context.recent_decisions] == [
             "Decision: keep context deterministic"
@@ -1386,6 +1388,49 @@ class TestContext:
         assert "elder-berry" in context.related_projects
         assert "Phase 4d" in context.suggested_searches
         assert "deployment" in context.suggested_searches
+
+    def test_context_open_items_use_closure_inference_not_30d_window(
+        self,
+        db: JournalDB,
+    ) -> None:
+        # The old context slice used digest.open_items (raw in_arbeit within
+        # the 30-day window): it over-reported resolved items inside the
+        # window and dropped genuinely-open items older than 30 days. The
+        # unified slice fixes both.
+        now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
+        started = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                phase="Phase 1",
+                content="phase 1 start (resolved, but inside 30d window)",
+                timestamp=now - timedelta(days=10),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.ABGESCHLOSSEN,
+                phase="Phase 1",
+                content="phase 1 done",
+                timestamp=now - timedelta(days=9),
+            )
+        )
+        genuinely_open = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                phase="Phase 2",
+                content="phase 2 still open, older than 30 days",
+                timestamp=now - timedelta(days=60),
+            )
+        )
+
+        context = db.context("bramble", n_recent=10, include_cross_project=False)
+        ids = [view.entry.id for view in context.open_items]
+
+        assert started.id not in ids  # resolved -> excluded
+        assert genuinely_open.id in ids  # >30d but unresolved -> still shown
 
     def test_context_empty_project_returns_empty_lists(self, db: JournalDB) -> None:
         context = db.context("berry-gym")

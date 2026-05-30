@@ -152,7 +152,7 @@ def _context_to_dict(context: JournalContext) -> dict[str, Any]:
     return {
         "project": context.project,
         "recent": [_entry_to_dict(entry) for entry in context.recent],
-        "open_items": [_entry_to_dict(entry) for entry in context.open_items],
+        "open_items": [_open_item_to_dict(view) for view in context.open_items],
         "recent_bugfixes": [
             _entry_to_dict(entry) for entry in context.recent_bugfixes
         ],

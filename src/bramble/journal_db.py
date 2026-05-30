@@ -793,6 +793,13 @@ class JournalDB:
 
         recent = tuple(self.read(project, n_recent))
         digest = self.digest(project=project, since="30d", limit=100)
+        # Open items use the append-only closure inference (resolved items
+        # excluded, stale flagged), NOT digest.open_items. digest.open_items
+        # is the raw status='in_arbeit' set within the 30-day digest window,
+        # which both over-reports (no closure) and silently drops genuinely
+        # open items older than 30 days. The curated session-start context
+        # must agree with journal_open_items.
+        open_items = tuple(self.open_items_view(project=project, limit=n_recent))
         suggested_searches = _context_suggested_searches(
             recent=recent,
             digest=digest,
@@ -808,7 +815,7 @@ class JournalDB:
         return JournalContext(
             project=project,
             recent=recent,
-            open_items=tuple(digest.open_items[:n_recent]),
+            open_items=open_items,
             recent_bugfixes=tuple(digest.bugfixes[:n_recent]),
             recent_decisions=tuple(digest.decisions[:n_recent]),
             related_projects=related_projects,
