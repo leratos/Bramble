@@ -3,7 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bramble"
+# Distribution name on PyPI (the importable package stays `bramble`).
+# `bramble` is already taken on PyPI, so the distribution is `bramble-journal`.
+name = "bramble-journal"
 version = "0.1.0"
 description = "Self-hosted MCP server providing a shared development journal across projects."
 readme = "README.md"
@@ -37,6 +39,11 @@ dev = [
 [project.scripts]
 bramble-server = "bramble.__main__:main"
 bramble-admin = "bramble.admin_main:main"
+
+[project.urls]
+Homepage = "https://github.com/leratos/Bramble"
+Repository = "https://github.com/leratos/Bramble"
+Issues = "https://github.com/leratos/Bramble/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
