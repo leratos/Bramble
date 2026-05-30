@@ -12,6 +12,14 @@ from bramble.journal_db import JournalDB
 from bramble.journal_context import JournalContext
 from bramble.journal_digest import JournalDigest
 from bramble.journal_entry import JournalEntry, JournalEntryLink, JournalStatus
+from bramble.open_item import (
+    REASON_LINK,
+    REASON_PHASE,
+    REASON_TEXT,
+    STATE_OPEN,
+    STATE_RESOLVED,
+    STATE_STALE,
+)
 from bramble.project_summary import ProjectSummary
 
 
@@ -1101,6 +1109,224 @@ class TestOpenItems:
         result = db.open_items(project="elder-berry", limit=10)
 
         assert [entry.id for entry in result] == [open_entry.id]
+
+
+# ---------------------------------------------------------------------------
+# open_items_view()
+# ---------------------------------------------------------------------------
+class TestOpenItemsView:
+    def test_classifies_open_and_stale_by_cutoff(self, db: JournalDB) -> None:
+        now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
+        recent = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content="recent",
+                timestamp=now - timedelta(days=3),
+            )
+        )
+        old = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content="old",
+                timestamp=now - timedelta(days=40),
+            )
+        )
+
+        views = db.open_items_view(project="bramble", now=now)
+        by_id = {view.entry.id: view for view in views}
+
+        assert by_id[recent.id].state == STATE_OPEN
+        assert by_id[recent.id].age_days == 3
+        assert by_id[old.id].state == STATE_STALE
+        assert by_id[old.id].age_days == 40
+
+        tighter = db.open_items_view(project="bramble", stale_after_days=2, now=now)
+        assert {v.entry.id: v.state for v in tighter} == {
+            recent.id: STATE_STALE,
+            old.id: STATE_STALE,
+        }
+
+    def test_resolved_via_link_carries_provenance(self, db: JournalDB) -> None:
+        open_entry = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                content="wip",
+            )
+        )
+        closer = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.ABGESCHLOSSEN,
+                content="done",
+                links=(
+                    JournalEntryLink(entry_id=open_entry.id, relation="resolves"),
+                ),
+            )
+        )
+
+        # Resolved items are hidden by default.
+        assert db.open_items_view(project="elder-berry") == []
+
+        views = db.open_items_view(project="elder-berry", include_resolved=True)
+        assert len(views) == 1
+        view = views[0]
+        assert view.entry.id == open_entry.id
+        assert view.state == STATE_RESOLVED
+        assert view.resolution_reason == REASON_LINK
+        assert view.resolved_by_id == closer.id
+
+    def test_resolved_via_text_mapping_carries_provenance(
+        self,
+        db: JournalDB,
+    ) -> None:
+        open_a = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                content="slice A",
+            )
+        )
+        mapper = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.NOTIZ,
+                content=f"Open-Items-Abgleich\n- #{open_a.id} -> #999",
+            )
+        )
+
+        views = db.open_items_view(project="elder-berry", include_resolved=True)
+        view = next(v for v in views if v.entry.id == open_a.id)
+        assert view.state == STATE_RESOLVED
+        assert view.resolution_reason == REASON_TEXT
+        assert view.resolved_by_id == mapper.id
+
+    def test_phase_heuristic_ignores_notiz_but_honors_abgeschlossen(
+        self,
+        db: JournalDB,
+    ) -> None:
+        now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
+        open_entry = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                phase="Phase 9",
+                content="start",
+                timestamp=now - timedelta(hours=2),
+            )
+        )
+        # A notiz sharing the phase must NOT close the item.
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.NOTIZ,
+                phase="Phase 9",
+                content="just a note",
+                timestamp=now - timedelta(hours=1),
+            )
+        )
+
+        views = db.open_items_view(
+            project="elder-berry", include_resolved=True, now=now
+        )
+        assert [v.state for v in views] == [STATE_OPEN]
+
+        # An abgeschlossen sharing the phase DOES close it, with provenance.
+        closer = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.ABGESCHLOSSEN,
+                phase="Phase 9",
+                content="phase done",
+                timestamp=now,
+            )
+        )
+        view = db.open_items_view(
+            project="elder-berry", include_resolved=True, now=now
+        )[0]
+        assert view.state == STATE_RESOLVED
+        assert view.resolution_reason == REASON_PHASE
+        assert view.resolved_by_id == closer.id
+
+    def test_explicit_link_reason_beats_phase_heuristic(
+        self,
+        db: JournalDB,
+    ) -> None:
+        now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
+        open_entry = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                phase="Phase 12",
+                content="start",
+                timestamp=now - timedelta(hours=2),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.ABGESCHLOSSEN,
+                phase="Phase 12",
+                content="phase done",
+                timestamp=now - timedelta(hours=1),
+            )
+        )
+        resolver = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.ABGESCHLOSSEN,
+                content="explicit resolve",
+                links=(
+                    JournalEntryLink(entry_id=open_entry.id, relation="resolves"),
+                ),
+                timestamp=now,
+            )
+        )
+
+        view = db.open_items_view(
+            project="elder-berry", include_resolved=True, now=now
+        )[0]
+        assert view.resolution_reason == REASON_LINK
+        assert view.resolved_by_id == resolver.id
+
+    def test_open_items_keeps_item_when_only_notiz_shares_phase(
+        self,
+        db: JournalDB,
+    ) -> None:
+        # Regression for the heuristic tightening: a notiz no longer closes
+        # work via the phase path, so the legacy open_items() keeps the item.
+        open_entry = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                phase="Phase 50",
+                content="start",
+                timestamp=datetime(2026, 5, 29, 10, 0, tzinfo=UTC),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.NOTIZ,
+                phase="Phase 50",
+                content="note in same phase",
+                timestamp=datetime(2026, 5, 29, 11, 0, tzinfo=UTC),
+            )
+        )
+
+        result = db.open_items(project="elder-berry", limit=10)
+
+        assert [entry.id for entry in result] == [open_entry.id]
+
+    def test_rejects_non_positive_stale_after_days(self, db: JournalDB) -> None:
+        with pytest.raises(ValueError, match="positive"):
+            db.open_items_view(stale_after_days=0)
+
+    def test_rejects_non_bool_include_resolved(self, db: JournalDB) -> None:
+        with pytest.raises(TypeError):
+            db.open_items_view(include_resolved="yes")  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------

@@ -35,6 +35,16 @@ from pathlib import Path
 from bramble.journal_context import JournalContext
 from bramble.journal_entry import JournalEntry, JournalEntryLink, JournalStatus
 from bramble.journal_digest import JournalDigest
+from bramble.open_item import (
+    OpenItemView,
+    REASON_LINK,
+    REASON_PHASE,
+    REASON_TEXT,
+    REASON_TITLE,
+    STATE_OPEN,
+    STATE_RESOLVED,
+    STATE_STALE,
+)
 from bramble.project_summary import ProjectSummary
 
 logger = logging.getLogger(__name__)
@@ -43,6 +53,7 @@ _PROJECT_STATUSES = {"active", "paused", "archived"}
 _SEARCH_ALL_LIMIT_MAX = 100
 _DIGEST_LIMIT_MAX = 100
 _OPEN_ITEMS_LIMIT_MAX = 100
+_OPEN_ITEMS_DEFAULT_STALE_AFTER_DAYS = 30
 _CONTEXT_N_RECENT_MAX = 100
 _CONTEXT_RELATED_PROJECTS_MAX = 5
 _CONTEXT_RELATED_SEARCH_LIMIT = 20
@@ -620,32 +631,83 @@ class JournalDB:
         project: str | None = None,
         limit: int = 50,
     ) -> list[JournalEntry]:
-        """Return newest actionable open work items.
+        """Return newest actionable open work items as plain entries.
 
-        Base set is ``status='in_arbeit'``. Entries are suppressed when a
-        newer non-``in_arbeit`` entry in the same project clearly marks them
-        as closed via either:
+        Base set is ``status='in_arbeit'``. Effectively-closed entries are
+        suppressed (see :meth:`open_items_view` for the closure rules and
+        provenance). Items that are merely *stale* are kept, so this stays a
+        superset-safe view: it errs toward over- rather than under-reporting.
 
-        * an incoming closing link relation (``corrects``, ``supersedes``,
-          ``implements``),
-        * a textual mapping in the newer entry content like ``#123 -> #124``,
-        * a newer entry with the same normalized phase, or
-        * a newer entry with the same normalized title or explicit base title.
+        This method keeps its historical ``list[JournalEntry]`` shape for
+        existing callers (admin read model). Use :meth:`open_items_view` to
+        get resolution provenance and staleness annotations.
         """
 
         self._validate_open_items_limit_arg(limit)
-        entries = self._open_item_entries(project=project)
+        views = self._open_item_views(project=project)
+        entries = [view.entry for view in views if not view.is_resolved]
         return entries[:limit]
 
     def open_item_count(self, *, project: str | None = None) -> int:
-        """Return the full count of actionable open work items."""
+        """Return the full count of actionable open work items.
 
-        return len(self._open_item_entries(project=project))
+        Counts ``open`` and ``stale`` views; resolved items are excluded.
+        """
 
-    def _open_item_entries(self, *, project: str | None = None) -> list[JournalEntry]:
+        views = self._open_item_views(project=project)
+        return sum(1 for view in views if not view.is_resolved)
+
+    def open_items_view(
+        self,
+        *,
+        project: str | None = None,
+        limit: int = 50,
+        include_resolved: bool = False,
+        stale_after_days: int = _OPEN_ITEMS_DEFAULT_STALE_AFTER_DAYS,
+        now: datetime | None = None,
+    ) -> list[OpenItemView]:
+        """Return newest open work items with resolution + staleness provenance.
+
+        Each ``in_arbeit`` entry is classified as:
+
+        * ``resolved`` – a later entry in the same project marks it closed via
+          an explicit closing link (``resolves``/``corrects``/``supersedes``/
+          ``implements``), an explicit ``#<open> -> #<new>`` content mapping,
+          or — heuristically — a later ``abgeschlossen``/``bugfix`` entry with
+          the same normalized title or phase. ``notiz`` no longer closes via
+          the title/phase heuristic (only via the explicit link/text paths).
+        * ``stale`` – unresolved and older than ``stale_after_days``.
+        * ``open`` – unresolved and within the stale window.
+
+        Resolved items are excluded unless ``include_resolved`` is true; the
+        view always carries ``resolution_reason`` and ``resolved_by_id`` so the
+        suppression is auditable.
+        """
+
+        self._validate_open_items_limit_arg(limit)
+        if not isinstance(include_resolved, bool):
+            raise TypeError("include_resolved must be a bool")
+        self._validate_stale_after_days_arg(stale_after_days)
+        views = self._open_item_views(
+            project=project,
+            stale_after_days=stale_after_days,
+            now=now,
+        )
+        if not include_resolved:
+            views = [view for view in views if not view.is_resolved]
+        return views[:limit]
+
+    def _open_item_views(
+        self,
+        *,
+        project: str | None = None,
+        stale_after_days: int = _OPEN_ITEMS_DEFAULT_STALE_AFTER_DAYS,
+        now: datetime | None = None,
+    ) -> list[OpenItemView]:
         if project is not None:
             self._validate_project_arg(project)
             project = project.strip()
+        reference_now = _resolve_open_items_now(now)
 
         where = ["status = ?"]
         params: list[object] = [JournalStatus.IN_ARBEIT.value]
@@ -662,11 +724,13 @@ class JournalDB:
         )
         with self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
-            entries = _filter_effectively_closed_open_items(
+            entries = self._rows_to_entries(conn, rows)
+            return _classify_open_items(
                 conn,
-                self._rows_to_entries(conn, rows),
+                entries,
+                now=reference_now,
+                stale_after_days=stale_after_days,
             )
-            return entries
 
     def project_overview(self) -> list[ProjectSummary]:
         """Return one :class:`ProjectSummary` per project, newest activity first.
@@ -850,6 +914,14 @@ class JournalDB:
         JournalDB._validate_limit_arg(value, name="limit")
         if value > _OPEN_ITEMS_LIMIT_MAX:
             raise ValueError(f"limit must be at most {_OPEN_ITEMS_LIMIT_MAX}")
+
+    @staticmethod
+    def _validate_stale_after_days_arg(value: object) -> None:
+        # bool is a subclass of int – exclude it explicitly.
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError("stale_after_days must be an int")
+        if value <= 0:
+            raise ValueError("stale_after_days must be positive")
 
 
 def _migrate_projects_from_entries(conn: sqlite3.Connection) -> None:
@@ -1269,162 +1341,243 @@ def _entry_is_decision(entry: JournalEntry) -> bool:
     )
 
 
-def _filter_effectively_closed_open_items(
+_REASON_RANK = {
+    REASON_PHASE: 0,
+    REASON_TITLE: 1,
+    REASON_TEXT: 2,
+    REASON_LINK: 3,
+}
+
+
+def _resolve_open_items_now(now: datetime | None) -> datetime:
+    if now is None:
+        return datetime.now(tz=UTC)
+    if not isinstance(now, datetime):
+        raise TypeError("now must be a datetime")
+    if now.tzinfo is None or now.tzinfo.utcoffset(now) is None:
+        return now.replace(tzinfo=UTC)
+    return now.astimezone(UTC)
+
+
+def _age_days(entry: JournalEntry, now: datetime) -> int:
+    return max((now - entry.timestamp).days, 0)
+
+
+def _record_resolution(
+    resolutions: dict[int, tuple[str, int | None]],
+    open_id: int,
+    reason: str,
+    resolver_id: int | None,
+) -> None:
+    """Record a closure for ``open_id`` keeping the strongest signal.
+
+    Confidence order is ``link > text > title > phase``. On a tie the most
+    recent (largest-id) resolver wins so provenance is deterministic.
+    """
+
+    existing = resolutions.get(open_id)
+    if existing is None:
+        resolutions[open_id] = (reason, resolver_id)
+        return
+    existing_reason, existing_resolver = existing
+    if _REASON_RANK[reason] > _REASON_RANK[existing_reason]:
+        resolutions[open_id] = (reason, resolver_id)
+    elif _REASON_RANK[reason] == _REASON_RANK[existing_reason] and resolver_id is not None:
+        if existing_resolver is None or resolver_id > existing_resolver:
+            resolutions[open_id] = (reason, resolver_id)
+
+
+def _classify_open_items(
     conn: sqlite3.Connection,
     entries: list[JournalEntry],
-) -> list[JournalEntry]:
+    *,
+    now: datetime,
+    stale_after_days: int,
+) -> list[OpenItemView]:
     if not entries:
-        return entries
+        return []
 
     by_project: dict[str, list[JournalEntry]] = {}
     for entry in entries:
         by_project.setdefault(entry.project, []).append(entry)
 
-    filtered: list[JournalEntry] = []
+    resolutions: dict[int, tuple[str, int | None]] = {}
     for project, project_entries in by_project.items():
-        closed_ids = _infer_closed_open_item_ids(
-            conn,
-            project=project,
-            open_item_ids=[entry.id for entry in project_entries if entry.id is not None],
-        )
-        filtered.extend(
-            entry
-            for entry in project_entries
-            if entry.id is None or entry.id not in closed_ids
+        resolutions.update(
+            _infer_open_item_resolutions(
+                conn,
+                project=project,
+                open_entries=project_entries,
+            )
         )
 
-    filtered.sort(key=lambda entry: (entry.timestamp, entry.id or 0), reverse=True)
-    return filtered
+    views: list[OpenItemView] = []
+    for entry in entries:
+        age_days = _age_days(entry, now)
+        resolution = resolutions.get(entry.id) if entry.id is not None else None
+        if resolution is not None:
+            reason, resolver_id = resolution
+            views.append(
+                OpenItemView(
+                    entry=entry,
+                    state=STATE_RESOLVED,
+                    resolution_reason=reason,
+                    resolved_by_id=resolver_id,
+                    age_days=age_days,
+                )
+            )
+            continue
+        state = STATE_STALE if age_days >= stale_after_days else STATE_OPEN
+        views.append(
+            OpenItemView(
+                entry=entry,
+                state=state,
+                resolution_reason=None,
+                resolved_by_id=None,
+                age_days=age_days,
+            )
+        )
+
+    views.sort(
+        key=lambda view: (view.entry.timestamp, view.entry.id or 0),
+        reverse=True,
+    )
+    return views
 
 
-def _infer_closed_open_item_ids(
+def _infer_open_item_resolutions(
     conn: sqlite3.Connection,
     *,
     project: str,
-    open_item_ids: list[int],
-) -> set[int]:
-    if not open_item_ids:
-        return set()
+    open_entries: list[JournalEntry],
+) -> dict[int, tuple[str, int | None]]:
+    """Map open-item id -> (reason, resolver_id) for effectively-closed items.
 
+    Explicit signals (closing link relation, ``#<open> -> #<new>`` text) accept
+    any of ``abgeschlossen``/``bugfix``/``notiz`` as the closing entry. The
+    fuzzy title/phase heuristic only accepts ``abgeschlossen``/``bugfix`` —
+    ``notiz`` is not a completion and must not silently close work.
+    """
+
+    open_item_ids = [entry.id for entry in open_entries if entry.id is not None]
+    if not open_item_ids:
+        return {}
+
+    open_id_set = set(open_item_ids)
     placeholders = ",".join("?" for _ in open_item_ids)
-    closing_statuses = (
+    explicit_statuses = (
         JournalStatus.ABGESCHLOSSEN.value,
         JournalStatus.BUGFIX.value,
         JournalStatus.NOTIZ.value,
     )
-    status_placeholders = ",".join("?" for _ in closing_statuses)
-    rows = conn.execute(
+    explicit_placeholders = ",".join("?" for _ in explicit_statuses)
+    heuristic_statuses = (
+        JournalStatus.ABGESCHLOSSEN.value,
+        JournalStatus.BUGFIX.value,
+    )
+    heuristic_placeholders = ",".join("?" for _ in heuristic_statuses)
+
+    resolutions: dict[int, tuple[str, int | None]] = {}
+
+    # (1) Explicit closing links (highest confidence).
+    link_rows = conn.execute(
+        f"""
+        SELECT l.to_entry_id AS open_id, l.from_entry_id AS resolver_id
+        FROM journal_entry_links l
+        JOIN journal_entries je ON je.id = l.from_entry_id
+        WHERE je.project = ?
+          AND je.status IN ({explicit_placeholders})
+          AND l.relation IN ('resolves', 'corrects', 'supersedes', 'implements')
+          AND l.to_entry_id IN ({placeholders})
+        """,
+        [project, *explicit_statuses, *open_item_ids],
+    ).fetchall()
+    for row in link_rows:
+        _record_resolution(
+            resolutions, int(row["open_id"]), REASON_LINK, int(row["resolver_id"])
+        )
+
+    # (2) Explicit textual '#<open> -> #<new>' mappings.
+    text_rows = conn.execute(
         f"""
         SELECT id, content
         FROM journal_entries
         WHERE project = ?
-          AND status IN ({status_placeholders})
-          AND (
-                content LIKE '%#% -> #%'
-                OR EXISTS (
-                    SELECT 1
-                    FROM journal_entry_links l
-                    WHERE l.from_entry_id = journal_entries.id
-                      AND l.relation IN (
-                          'resolves', 'corrects', 'supersedes', 'implements'
-                      )
-                      AND l.to_entry_id IN ({placeholders})
-                )
-          )
+          AND status IN ({explicit_placeholders})
+          AND content LIKE '%#% -> #%'
         """,
-        [project, *closing_statuses, *open_item_ids],
+        [project, *explicit_statuses],
     ).fetchall()
-
-    closed_ids: set[int] = set()
-    for row in rows:
+    for row in text_rows:
         content = row["content"] or ""
         for match in _OPEN_ITEMS_CLOSING_RE.finditer(content):
             open_id = int(match.group("open_id"))
-            if open_id in open_item_ids:
-                closed_ids.add(open_id)
+            if open_id in open_id_set:
+                _record_resolution(resolutions, open_id, REASON_TEXT, int(row["id"]))
 
-    if rows:
-        link_rows = conn.execute(
-            f"""
-            SELECT l.to_entry_id
-            FROM journal_entry_links l
-            JOIN journal_entries je ON je.id = l.from_entry_id
-            WHERE je.project = ?
-              AND je.status IN ({status_placeholders})
-              AND l.relation IN (
-                  'resolves', 'corrects', 'supersedes', 'implements'
-              )
-              AND l.to_entry_id IN ({placeholders})
-            """,
-            [project, *closing_statuses, *open_item_ids],
-        ).fetchall()
-        closed_ids.update(int(row["to_entry_id"]) for row in link_rows)
+    # (3) + (4) Heuristic: a later abgeschlossen/bugfix entry with the same
+    # normalized title or phase. notiz is deliberately excluded here.
+    open_items_by_phase: dict[str, list[tuple[int, datetime]]] = {}
+    open_items_by_title: dict[str, list[tuple[int, datetime]]] = {}
+    for entry in open_entries:
+        if entry.id is None:
+            continue
+        phase_key = _normalise_phase_key(entry.phase)
+        if phase_key is not None:
+            open_items_by_phase.setdefault(phase_key, []).append(
+                (entry.id, entry.timestamp)
+            )
+        for title_key in _normalise_title_keys(entry.title):
+            open_items_by_title.setdefault(title_key, []).append(
+                (entry.id, entry.timestamp)
+            )
 
-    phase_rows = conn.execute(
+    if not (open_items_by_phase or open_items_by_title):
+        return resolutions
+
+    close_rows = conn.execute(
         f"""
         SELECT id, phase, title, timestamp
         FROM journal_entries
         WHERE project = ?
-          AND id IN ({placeholders})
+          AND status IN ({heuristic_placeholders})
         """,
-        [project, *open_item_ids],
+        [project, *heuristic_statuses],
     ).fetchall()
-    open_items_by_phase: dict[str, list[tuple[int, datetime]]] = {}
-    open_items_by_title: dict[str, list[tuple[int, datetime]]] = {}
-    for row in phase_rows:
-        phase_key = _normalise_phase_key(row["phase"])
+    latest_close_by_phase: dict[str, tuple[datetime, int]] = {}
+    latest_close_by_title: dict[str, tuple[datetime, int]] = {}
+    for row in close_rows:
         ts = _parse_optional_timestamp(row["timestamp"])
         if ts is None:
             continue
+        marker = (ts, int(row["id"]))
+        phase_key = _normalise_phase_key(row["phase"])
         if phase_key is not None:
-            open_items_by_phase.setdefault(phase_key, []).append((int(row["id"]), ts))
+            prev_phase = latest_close_by_phase.get(phase_key)
+            if prev_phase is None or marker > prev_phase:
+                latest_close_by_phase[phase_key] = marker
         for title_key in _normalise_title_keys(row["title"]):
-            open_items_by_title.setdefault(title_key, []).append((int(row["id"]), ts))
+            prev_title = latest_close_by_title.get(title_key)
+            if prev_title is None or marker > prev_title:
+                latest_close_by_title[title_key] = marker
 
-    if open_items_by_phase or open_items_by_title:
-        close_rows = conn.execute(
-            f"""
-            SELECT id, phase, title, timestamp
-            FROM journal_entries
-            WHERE project = ?
-              AND status IN ({status_placeholders})
-            """,
-            [project, *closing_statuses],
-        ).fetchall()
-        latest_close_by_phase: dict[str, tuple[datetime, int]] = {}
-        latest_close_by_title: dict[str, tuple[datetime, int]] = {}
-        for row in close_rows:
-            phase_key = _normalise_phase_key(row["phase"])
-            ts = _parse_optional_timestamp(row["timestamp"])
-            if ts is None:
-                continue
-            marker = (ts, int(row["id"]))
-            if phase_key is not None:
-                prev_phase = latest_close_by_phase.get(phase_key)
-                if prev_phase is None or marker > prev_phase:
-                    latest_close_by_phase[phase_key] = marker
-            for title_key in _normalise_title_keys(row["title"]):
-                prev_title = latest_close_by_title.get(title_key)
-                if prev_title is None or marker > prev_title:
-                    latest_close_by_title[title_key] = marker
+    for phase_key, open_rows in open_items_by_phase.items():
+        close_marker = latest_close_by_phase.get(phase_key)
+        if close_marker is None:
+            continue
+        for open_id, open_ts in open_rows:
+            if (open_ts, open_id) < close_marker:
+                _record_resolution(resolutions, open_id, REASON_PHASE, close_marker[1])
 
-        for phase_key, open_rows in open_items_by_phase.items():
-            close_marker = latest_close_by_phase.get(phase_key)
-            if close_marker is None:
-                continue
-            for open_id, open_ts in open_rows:
-                if (open_ts, open_id) < close_marker:
-                    closed_ids.add(open_id)
+    for title_key, open_rows in open_items_by_title.items():
+        close_marker = latest_close_by_title.get(title_key)
+        if close_marker is None:
+            continue
+        for open_id, open_ts in open_rows:
+            if (open_ts, open_id) < close_marker:
+                _record_resolution(resolutions, open_id, REASON_TITLE, close_marker[1])
 
-        for title_key, open_rows in open_items_by_title.items():
-            close_marker = latest_close_by_title.get(title_key)
-            if close_marker is None:
-                continue
-            for open_id, open_ts in open_rows:
-                if (open_ts, open_id) < close_marker:
-                    closed_ids.add(open_id)
-
-    return closed_ids
+    return resolutions
 
 
 def _normalise_phase_key(value: str | None) -> str | None:
