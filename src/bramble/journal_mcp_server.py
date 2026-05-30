@@ -37,6 +37,7 @@ from bramble.journal_context import JournalContext
 from bramble.journal_digest import JournalDigest
 from bramble.journal_entry import JournalEntry, JournalStatus
 from bramble.mcp_errors import translate_errors
+from bramble.open_item import OpenItemView
 from bramble.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
@@ -113,6 +114,22 @@ def _entry_to_dict(entry: JournalEntry) -> dict[str, Any]:
             for link in entry.backlinks
         ],
     }
+
+
+def _open_item_to_dict(view: OpenItemView) -> dict[str, Any]:
+    """Serialise an :class:`OpenItemView` to an MCP-friendly dict.
+
+    The underlying entry fields are kept at the top level (backward
+    compatible with the pre-Phase-4f entry shape) and augmented with the
+    open-item lifecycle annotations.
+    """
+
+    data = _entry_to_dict(view.entry)
+    data["open_state"] = view.state
+    data["resolution_reason"] = view.resolution_reason
+    data["resolved_by_id"] = view.resolved_by_id
+    data["age_days"] = view.age_days
+    return data
 
 
 def _digest_to_dict(digest: JournalDigest) -> dict[str, Any]:
@@ -533,22 +550,42 @@ class JournalMCPServer:
         async def journal_open_items(
             project: str | None = None,
             limit: int = 50,
+            include_resolved: bool = False,
+            stale_after_days: int = 30,
         ) -> list[dict[str, Any]]:
-            """Return newest open work items.
+            """Return newest open work items with resolution + staleness.
 
-            Open items are entries with ``status='in_arbeit'``.
+            Base set is ``status='in_arbeit'``. The journal is append-only,
+            so completion is a *new* entry; this tool infers which started
+            items are effectively done instead of reporting every one as
+            open. Each item carries ``open_state`` (``open`` | ``stale`` |
+            ``resolved``), ``resolution_reason`` (``link`` | ``text`` |
+            ``title`` | ``phase`` | ``null``), ``resolved_by_id`` and
+            ``age_days``.
+
+            * ``resolved`` items are inferred-closed and hidden unless
+              ``include_resolved`` is true; the reason/resolver make the
+              suppression auditable.
+            * ``stale`` items are unresolved but older than
+              ``stale_after_days`` (default 30); they are still returned,
+              just flagged.
+            * the most reliable close signal is an explicit ``resolves``
+              link from the completing entry to the open one.
+
             Optional ``project`` narrows to one project; otherwise the
             result is cross-project. At most 100 rows can be requested.
             """
 
             if project is not None:
                 _require_kebab_case(project)
-            entries = await asyncio.to_thread(
-                db.open_items,
+            views = await asyncio.to_thread(
+                db.open_items_view,
                 project=project,
                 limit=limit,
+                include_resolved=include_resolved,
+                stale_after_days=stale_after_days,
             )
-            return [_entry_to_dict(entry) for entry in entries]
+            return [_open_item_to_dict(view) for view in views]
 
         @app.tool
         @translate_errors
