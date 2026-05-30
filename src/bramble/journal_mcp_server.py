@@ -31,6 +31,7 @@ from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_http_headers, get_http_request
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 
+from bramble.agent_guide import AGENT_GUIDE, AGENT_GUIDE_VERSION
 from bramble.auth_validator import AuthValidator
 from bramble.journal_db import JournalDB
 from bramble.journal_context import JournalContext
@@ -332,6 +333,10 @@ class JournalMCPServer:
             name="bramble",
             instructions=(
                 "Shared development journal across projects. "
+                "At session start, first call journal_guide for the "
+                "canonical, project-agnostic working conventions "
+                "(append-only model, statuses, tags, corrections, "
+                "open-item/resolves semantics, DoD) and follow them. "
                 "Use journal_append to record new entries, journal_read "
                 "to fetch recent entries, journal_search or "
                 "journal_search_all for full-text search, journal_context "
@@ -606,6 +611,25 @@ class JournalMCPServer:
                 }
                 for s in summaries
             ]
+
+        @app.tool
+        @translate_errors
+        async def journal_guide() -> dict[str, Any]:
+            """Return the canonical shared agent working conventions.
+
+            This is the single source of truth for the project-agnostic
+            Bramble journal workflow (append-only model, statuses, tags,
+            corrections, open-item/resolves semantics, session start/end
+            and Definition of Done). Projects reference this guide instead
+            of copying the conventions into each project's instructions, so
+            there is one place to maintain and no drift.
+
+            Call this at session start and follow it. ``version`` is the ISO
+            date of the last change, so a caller can tell whether the guide
+            moved since it last read it.
+            """
+
+            return {"version": AGENT_GUIDE_VERSION, "guide": AGENT_GUIDE}
 
     # ------------------------------------------------------------------
     # Transport entry point
