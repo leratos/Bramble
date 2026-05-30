@@ -133,6 +133,55 @@ def _open_item_to_dict(view: OpenItemView) -> dict[str, Any]:
     return data
 
 
+# journal_context is the first call of every session. Returning full entry
+# bodies for every slice makes the payload large enough that big projects
+# overflow the client's tool-result budget and spill to a file. The curated
+# context exists to orient, so it returns a content preview by default; full
+# bodies stay available via journal_read / journal_search (or full=True).
+_CONTEXT_CONTENT_PREVIEW_CHARS = 500
+
+
+def _truncate_content(content: str, max_chars: int) -> str:
+    snippet = content[:max_chars]
+    # Avoid cutting mid-word when a space sits near the end of the window.
+    space = snippet.rfind(" ")
+    if space >= max_chars - 40:
+        snippet = snippet[:space]
+    return snippet.rstrip() + " …"
+
+
+def _preview_entry_to_dict(
+    entry: JournalEntry, *, max_chars: int | None
+) -> dict[str, Any]:
+    """Serialise an entry, previewing ``content`` when ``max_chars`` is set.
+
+    ``content_chars`` always carries the original length and
+    ``content_truncated`` whether the preview was shortened, so a caller can
+    decide to fetch the full entry. ``max_chars=None`` keeps the full body.
+    """
+
+    data = _entry_to_dict(entry)
+    full = data["content"]
+    data["content_chars"] = len(full)
+    if max_chars is not None and len(full) > max_chars:
+        data["content"] = _truncate_content(full, max_chars)
+        data["content_truncated"] = True
+    else:
+        data["content_truncated"] = False
+    return data
+
+
+def _preview_open_item_to_dict(
+    view: OpenItemView, *, max_chars: int | None
+) -> dict[str, Any]:
+    data = _preview_entry_to_dict(view.entry, max_chars=max_chars)
+    data["open_state"] = view.state
+    data["resolution_reason"] = view.resolution_reason
+    data["resolved_by_id"] = view.resolved_by_id
+    data["age_days"] = view.age_days
+    return data
+
+
 def _digest_to_dict(digest: JournalDigest) -> dict[str, Any]:
     return {
         "range": {
@@ -149,16 +198,25 @@ def _digest_to_dict(digest: JournalDigest) -> dict[str, Any]:
     }
 
 
-def _context_to_dict(context: JournalContext) -> dict[str, Any]:
+def _context_to_dict(context: JournalContext, *, full: bool = False) -> dict[str, Any]:
+    max_chars = None if full else _CONTEXT_CONTENT_PREVIEW_CHARS
     return {
         "project": context.project,
-        "recent": [_entry_to_dict(entry) for entry in context.recent],
-        "open_items": [_open_item_to_dict(view) for view in context.open_items],
+        "recent": [
+            _preview_entry_to_dict(entry, max_chars=max_chars)
+            for entry in context.recent
+        ],
+        "open_items": [
+            _preview_open_item_to_dict(view, max_chars=max_chars)
+            for view in context.open_items
+        ],
         "recent_bugfixes": [
-            _entry_to_dict(entry) for entry in context.recent_bugfixes
+            _preview_entry_to_dict(entry, max_chars=max_chars)
+            for entry in context.recent_bugfixes
         ],
         "recent_decisions": [
-            _entry_to_dict(entry) for entry in context.recent_decisions
+            _preview_entry_to_dict(entry, max_chars=max_chars)
+            for entry in context.recent_decisions
         ],
         "related_projects": list(context.related_projects),
         "suggested_searches": list(context.suggested_searches),
@@ -532,6 +590,7 @@ class JournalMCPServer:
             project: str,
             n_recent: int = 10,
             include_cross_project: bool = True,
+            full: bool = False,
         ) -> dict[str, Any]:
             """Return curated session-start context for one project.
 
@@ -539,16 +598,24 @@ class JournalMCPServer:
             slices (open items, bugfixes, decisions) and optional
             cross-project related-project hints. The tool is strictly
             read-only and backward compatible with sparse metadata.
+
+            To keep this first-of-session call small, entry ``content`` is
+            previewed (truncated) by default; each entry carries
+            ``content_chars`` and ``content_truncated`` so you can fetch the
+            full body via journal_read/journal_search. Pass ``full=True`` to
+            get untruncated content.
             """
 
             _require_kebab_case(project)
+            if not isinstance(full, bool):
+                raise TypeError("full must be a bool")
             context = await asyncio.to_thread(
                 db.context,
                 project=project,
                 n_recent=n_recent,
                 include_cross_project=include_cross_project,
             )
-            return _context_to_dict(context)
+            return _context_to_dict(context, full=full)
 
         @app.tool
         @translate_errors

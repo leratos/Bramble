@@ -830,6 +830,71 @@ class TestJournalContext:
         assert "Phase 4d" in result.data["suggested_searches"]
         assert "deployment" in result.data["suggested_searches"]
 
+    async def test_content_is_previewed_by_default(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        now = datetime.now(tz=UTC)
+        long_content = "Diagnose " + "x" * 1200
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content=long_content,
+                title="Big",
+                timestamp=now,
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content="kurz",
+                title="Small",
+                timestamp=now - timedelta(minutes=1),
+            )
+        )
+
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_context", {"project": "bramble", "n_recent": 5}
+            )
+
+        rows = {row["title"]: row for row in result.data["recent"]}
+        big = rows["Big"]
+        assert big["content_truncated"] is True
+        assert big["content_chars"] == len(long_content)
+        assert len(big["content"]) < len(long_content)
+        assert big["content"].endswith("…")
+        small = rows["Small"]
+        assert small["content_truncated"] is False
+        assert small["content"] == "kurz"
+        assert small["content_chars"] == 4
+
+    async def test_full_true_returns_untruncated_content(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        long_content = "Diagnose " + "y" * 1200
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content=long_content,
+                title="BigFull",
+                timestamp=datetime.now(tz=UTC),
+            )
+        )
+
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_context",
+                {"project": "bramble", "n_recent": 5, "full": True},
+            )
+
+        row = next(r for r in result.data["recent"] if r["title"] == "BigFull")
+        assert row["content_truncated"] is False
+        assert row["content"] == long_content
+        assert row["content_chars"] == len(long_content)
+
     async def test_empty_project_returns_empty_lists(
         self, server: JournalMCPServer
     ) -> None:
