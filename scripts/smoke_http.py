@@ -150,6 +150,7 @@ EXPECTED_TOOLS = {
     "journal_search",
     "journal_search_all",
     "journal_list_projects",
+    "journal_guide",
 }
 
 SMOKE_MODE_WRITE_LIGHT = "write-light"
@@ -170,7 +171,7 @@ async def run_smoke(url: str, token: str, project: str, mode: str) -> int:
         if missing:
             fail(f"missing expected tools: {sorted(missing)}")
             return 1
-        ok("all eight expected tools are registered")
+        ok("all expected tools are registered")
 
         # ------------------------------------------------------------------
         # 2. The auth gate rejects a tokenless request

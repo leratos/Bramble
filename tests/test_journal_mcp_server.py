@@ -10,6 +10,7 @@ import pytest
 from fastmcp import Client, FastMCP
 from fastmcp.exceptions import ToolError
 
+from bramble.agent_guide import AGENT_GUIDE_VERSION
 from bramble.auth_validator import AuthValidator
 from bramble.journal_db import JournalDB
 from bramble.journal_entry import JournalEntry, JournalEntryLink, JournalStatus
@@ -162,6 +163,7 @@ class TestToolRegistry:
             "journal_append",
             "journal_context",
             "journal_digest",
+            "journal_guide",
             "journal_list_projects",
             "journal_open_items",
             "journal_read",
@@ -1076,6 +1078,34 @@ class TestJournalOpenItems:
         assert row["open_state"] == "resolved"
         assert row["resolution_reason"] == "link"
         assert row["resolved_by_id"] == closer.id
+
+
+# ---------------------------------------------------------------------------
+# journal_guide
+# ---------------------------------------------------------------------------
+class TestJournalGuide:
+    async def test_returns_versioned_guide_text(
+        self, server: JournalMCPServer
+    ) -> None:
+        async with Client(server.app) as client:
+            result = await client.call_tool("journal_guide", {})
+
+        assert set(result.data) == {"version", "guide"}
+        assert result.data["version"] == AGENT_GUIDE_VERSION
+        guide = result.data["guide"]
+        assert isinstance(guide, str) and guide.strip()
+        # Anchors on the conventions this guide is meant to carry.
+        for needle in ("append-only", "resolves", "journal_context", "in_arbeit"):
+            assert needle in guide
+
+    async def test_guide_needs_no_auth_scope(
+        self, server: JournalMCPServer
+    ) -> None:
+        # Pure read tool with no project argument: callable without a
+        # project-bound token.
+        async with Client(server.app) as client:
+            result = await client.call_tool("journal_guide", {})
+        assert result.data["guide"]
 
 
 # ---------------------------------------------------------------------------
