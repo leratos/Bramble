@@ -79,8 +79,27 @@ Fehlerübersetzung:
 | `journal_search_all(...)` | Projektuebergreifende FTS5-Suche mit optionalen Filtern, maximal 100 Treffer |
 | `journal_context(project, n_recent=10, include_cross_project=True)` | Kuratierter Session-Startkontext mit offenen Punkten, Bugfixes, Entscheidungen und optionalen Related-Projects |
 | `journal_digest(...)` | Strukturierter Zeitraum-Digest mit Counts und kuratierten Entry-Listen |
-| `journal_open_items(project=None, limit=50)` | Offene Arbeitspunkte (`status="in_arbeit"`) neueste zuerst, optional pro Projekt gefiltert |
+| `journal_open_items(project=None, limit=50, include_resolved=False, stale_after_days=30)` | Offene Arbeitspunkte mit append-only-Closure-Inferenz; je Item `open_state` (`open`/`stale`/`resolved`), `resolution_reason`, `resolved_by_id`, `age_days`. Resolved standardmäßig ausgeblendet |
 | `journal_list_projects()` | `(project, entry_count, last_timestamp)` pro Projekt, neueste Aktivität zuerst |
+
+### Offene Punkte im append-only-Modell
+
+Das Journal ändert Einträge nie; ein Abschluss ist ein neuer Eintrag. Ein
+roher `status="in_arbeit"`-Filter würde daher jeden je gestarteten Eintrag
+für immer als offen melden. `journal_open_items` und der `open_items`-Slice
+von `journal_context` inferieren deshalb, welche Items effektiv erledigt
+sind, und liefern die Begründung mit:
+
+- Zuverlässigstes Schließsignal ist ein expliziter Link
+  `resolves -> <offener Eintrag>` vom Abschluss-Eintrag (Relation `resolves`,
+  Phase 4f). Auch `corrects`/`supersedes`/`implements` und ein
+  `#<offen> -> #<neu>`-Textverweis schließen explizit.
+- Ohne expliziten Verweis greift eine konservative Heuristik (späterer
+  `abgeschlossen`/`bugfix`-Eintrag mit gleicher Phase oder gleichem Titel).
+- Unaufgelöste Items, die älter als `stale_after_days` sind, werden als
+  `stale` markiert (nicht versteckt).
+
+Details und Entscheidungen: `docs/concepts/phase-4f-open-items-resolution.md`.
 
 Projekt-Identifier müssen im MCP-Layer kebab-case sein
 (`^[a-z0-9][a-z0-9-]*$`). `JournalDB` selbst bleibt projekt-agnostisch.
