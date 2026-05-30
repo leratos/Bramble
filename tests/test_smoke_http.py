@@ -26,10 +26,10 @@ class _Tool:
 
 
 class _ClientContext:
-    def __init__(self, client: "_ScriptedClient") -> None:
+    def __init__(self, client: _ScriptedClient) -> None:
         self._client = client
 
-    async def __aenter__(self) -> "_ScriptedClient":
+    async def __aenter__(self) -> _ScriptedClient:
         return self._client
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
@@ -166,7 +166,16 @@ def test_run_smoke_read_only_success(monkeypatch: pytest.MonkeyPatch) -> None:
                 },
             ),
             ("journal_open_items", []),
-            ("journal_list_projects", [{"project": "bramble", "entry_count": 0, "last_timestamp": "2026-05-29T00:00:00+00:00"}]),
+            (
+                "journal_list_projects",
+                [
+                    {
+                        "project": "bramble",
+                        "entry_count": 0,
+                        "last_timestamp": "2026-05-29T00:00:00+00:00",
+                    }
+                ],
+            ),
             (
                 "journal_read",
                 smoke_http.ToolError("project must be kebab-case"),

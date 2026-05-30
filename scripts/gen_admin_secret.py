@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
+from collections.abc import Callable
 from getpass import getpass
 from pathlib import Path
-from typing import Callable
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -77,10 +78,8 @@ def _write_secret(path: Path, payload: dict[str, str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f"{path.name}.tmp")
     tmp_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    try:
+    with contextlib.suppress(OSError):
         os.chmod(tmp_path, 0o600)
-    except OSError:
-        pass
     os.replace(tmp_path, path)
 
 

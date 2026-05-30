@@ -9,6 +9,14 @@ alle Projekte ihre Journal-Einträge über das Model-Context-Protocol an
 einen gemeinsamen Server, der die Daten in einer SQLite-Datenbank
 ablegt und projektübergreifend durchsuchbar macht.
 
+> **Sicherheitsmodell (bitte zuerst lesen):** Bramble ist ein
+> Single-Owner-Werkzeug. Lesen und Suchen sind projektübergreifend — **jedes
+> gültige Token liest die Einträge aller Projekte**; nur das Schreiben ist
+> projektgebunden. Es gibt **keine Mandantentrennung** und das Tool ist nicht
+> dafür gedacht, fremde, gegenseitig misstrauende Nutzer auf einer Instanz zu
+> bedienen. Append-only bedeutet zudem kein Löschen. Details und
+> Betriebsempfehlungen: [SECURITY.md](SECURITY.md).
+
 ## Status
 
 In aktiver Entwicklung. **Phase 3 – Deployment & Härtung** ist
@@ -306,4 +314,9 @@ Bramble/
 
 ## Lizenz
 
-Proprietär. Keine öffentliche Nutzung vorgesehen.
+Apache-2.0 — siehe [LICENSE](LICENSE) und [NOTICE](NOTICE). Beiträge werden
+unter denselben Bedingungen angenommen.
+
+Hinweis zu `deploy/`: Die dortigen systemd-Units, Nginx-Direktiven und
+Fail2Ban-Regeln sind **Beispiele** für den Referenz-Host (Domain, Pfade wie
+`/opt/bramble`). Passe sie an deine Umgebung an.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
@@ -60,7 +61,7 @@ class TestProjectSummaryConstruction:
             entry_count=1,
             last_timestamp=datetime.now(tz=UTC),
         )
-        with pytest.raises(Exception):  # dataclasses.FrozenInstanceError
+        with pytest.raises(FrozenInstanceError):
             summary.entry_count = 99  # type: ignore[misc]
 
 

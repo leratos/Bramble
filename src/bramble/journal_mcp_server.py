@@ -33,8 +33,8 @@ from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 
 from bramble.agent_guide import AGENT_GUIDE, AGENT_GUIDE_VERSION
 from bramble.auth_validator import AuthValidator
-from bramble.journal_db import JournalDB
 from bramble.journal_context import JournalContext
+from bramble.journal_db import JournalDB
 from bramble.journal_digest import JournalDigest
 from bramble.journal_entry import JournalEntry, JournalStatus
 from bramble.mcp_errors import translate_errors

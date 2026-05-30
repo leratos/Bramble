@@ -33,10 +33,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from bramble.journal_context import JournalContext
-from bramble.journal_entry import JournalEntry, JournalEntryLink, JournalStatus
 from bramble.journal_digest import JournalDigest
+from bramble.journal_entry import JournalEntry, JournalEntryLink, JournalStatus
 from bramble.open_item import (
-    OpenItemView,
     REASON_LINK,
     REASON_PHASE,
     REASON_TEXT,
@@ -44,6 +43,7 @@ from bramble.open_item import (
     STATE_OPEN,
     STATE_RESOLVED,
     STATE_STALE,
+    OpenItemView,
 )
 from bramble.project_summary import ProjectSummary
 
@@ -1387,11 +1387,12 @@ def _record_resolution(
         resolutions[open_id] = (reason, resolver_id)
         return
     existing_reason, existing_resolver = existing
-    if _REASON_RANK[reason] > _REASON_RANK[existing_reason]:
+    if _REASON_RANK[reason] > _REASON_RANK[existing_reason] or (
+        _REASON_RANK[reason] == _REASON_RANK[existing_reason]
+        and resolver_id is not None
+        and (existing_resolver is None or resolver_id > existing_resolver)
+    ):
         resolutions[open_id] = (reason, resolver_id)
-    elif _REASON_RANK[reason] == _REASON_RANK[existing_reason] and resolver_id is not None:
-        if existing_resolver is None or resolver_id > existing_resolver:
-            resolutions[open_id] = (reason, resolver_id)
 
 
 def _classify_open_items(
@@ -1631,10 +1632,10 @@ def _context_suggested_searches(
             seen.add(entry.phase)
 
     lowered_text = "\n".join(
-        (
+
             f"{entry.title or ''}\n{entry.content}\n{' '.join(entry.tags)}"
             for entry in digest.entries
-        )
+
     ).lower()
     for term in _CONTEXT_SUGGESTION_TERMS:
         if term == "bugfix":

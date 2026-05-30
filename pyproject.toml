@@ -3,18 +3,20 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bramble"
+# Distribution name on PyPI (the importable package stays `bramble`).
+# `bramble` is already taken on PyPI, so the distribution is `bramble-journal`.
+name = "bramble-journal"
 version = "0.1.0"
 description = "Self-hosted MCP server providing a shared development journal across projects."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "Proprietary" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "leratos" }]
 keywords = ["mcp", "journal", "fastmcp", "sqlite"]
 classifiers = [
     "Programming Language :: Python :: 3.12",
     "Operating System :: OS Independent",
-    "Private :: Do Not Upload",
+    "License :: OSI Approved :: Apache Software License",
 ]
 
 # Runtime-Deps. FastMCP-Range gemäss Entscheidung A im Phase-2-Konzept,
@@ -32,11 +34,17 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "ruff>=0.6",
 ]
 
 [project.scripts]
 bramble-server = "bramble.__main__:main"
 bramble-admin = "bramble.admin_main:main"
+
+[project.urls]
+Homepage = "https://github.com/leratos/Bramble"
+Repository = "https://github.com/leratos/Bramble"
+Issues = "https://github.com/leratos/Bramble/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -56,3 +64,6 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+# UP047 (PEP 695 type parameters) would rewrite the translate_errors
+# decorator's TypeVar/ParamSpec signature; deferred as a modernization.
+ignore = ["UP047"]

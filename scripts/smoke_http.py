@@ -79,7 +79,6 @@ from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.exceptions import ToolError
 
-
 DEFAULT_URL = "http://127.0.0.1:8765/mcp/"
 
 # A kebab-case project the token is guaranteed not to own, used for the

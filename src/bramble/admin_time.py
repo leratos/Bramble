@@ -72,14 +72,12 @@ class _EuropeBerlinFallback(tzinfo):
         end = datetime(local.year, 10, _last_sunday(local.year, 10), 3)
         if not start <= local < end:
             return False
-        if (
+        return not (
             local.month == 10
             and local.day == _last_sunday(local.year, 10)
             and local.hour == 2
             and dt.fold == 1
-        ):
-            return False
-        return True
+        )
 
 
 def _berlin_dst_active_utc(utc_naive: datetime) -> bool:

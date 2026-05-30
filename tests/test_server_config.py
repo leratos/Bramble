@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
@@ -39,7 +40,7 @@ class TestServerConfigConstruction:
 
     def test_config_is_frozen(self) -> None:
         cfg = ServerConfig(**self._valid_kwargs())
-        with pytest.raises(Exception):  # FrozenInstanceError
+        with pytest.raises(FrozenInstanceError):
             cfg.port = 9999  # type: ignore[misc]
 
     def test_db_path_must_be_path(self) -> None:
