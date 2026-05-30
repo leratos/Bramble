@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from bramble.journal_db import JournalDB
 from bramble.journal_context import JournalContext
+from bramble.journal_db import JournalDB
 from bramble.journal_digest import JournalDigest
 from bramble.journal_entry import JournalEntry, JournalEntryLink, JournalStatus
 from bramble.open_item import (
@@ -1208,7 +1208,7 @@ class TestOpenItemsView:
         db: JournalDB,
     ) -> None:
         now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
-        open_entry = db.append(
+        db.append(
             JournalEntry(
                 project="elder-berry",
                 status=JournalStatus.IN_ARBEIT,

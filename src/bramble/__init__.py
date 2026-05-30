@@ -70,13 +70,13 @@ def __getattr__(name: str) -> Any:
     """
 
     if name == "JournalMCPServer":
-        from bramble.journal_mcp_server import JournalMCPServer
-
         # Cache on the module so subsequent ``bramble.JournalMCPServer``
         # lookups skip __getattr__ entirely. Without this, every access
         # would re-run the import machinery (cheap once cached in
         # sys.modules, but still noisy).
         import sys
+
+        from bramble.journal_mcp_server import JournalMCPServer
 
         module = sys.modules[__name__]
         setattr(module, name, JournalMCPServer)

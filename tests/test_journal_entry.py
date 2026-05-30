@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
@@ -74,7 +75,7 @@ class TestJournalEntryConstruction:
             status=JournalStatus.NOTIZ,
             content="immutable",
         )
-        with pytest.raises(Exception):  # FrozenInstanceError is a subclass
+        with pytest.raises(FrozenInstanceError):
             entry.project = "other"  # type: ignore[misc]
 
 

@@ -52,9 +52,11 @@ class TestTranslateErrors:
         async def tool() -> None:
             raise KeyError("missing key")
 
-        with caplog.at_level(logging.ERROR, logger="bramble.mcp_errors"):
-            with pytest.raises(RuntimeError, match="internal error in tool"):
-                await tool()
+        with (
+            caplog.at_level(logging.ERROR, logger="bramble.mcp_errors"),
+            pytest.raises(RuntimeError, match="internal error in tool"),
+        ):
+            await tool()
 
         # The original KeyError must appear in the logs (via exc_info)
         # so the operator can diagnose it, but never in the message
@@ -76,8 +78,10 @@ class TestTranslateErrors:
         async def tool() -> None:
             raise ValueError("bad input")
 
-        with caplog.at_level(logging.WARNING, logger="bramble.mcp_errors"):
-            with pytest.raises(ToolError):
-                await tool()
+        with (
+            caplog.at_level(logging.WARNING, logger="bramble.mcp_errors"),
+            pytest.raises(ToolError),
+        ):
+            await tool()
 
         assert any("rejected input" in rec.message for rec in caplog.records)

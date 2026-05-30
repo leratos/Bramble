@@ -39,7 +39,6 @@ if SRC.exists() and str(SRC) not in sys.path:
 from bramble.journal_db import JournalDB  # noqa: E402  (sys.path setup above)
 from bramble.server_config import ENV_DB_PATH  # noqa: E402
 
-
 DEFAULT_DB_PATH = ROOT / "data" / "bramble.db"
 
 
