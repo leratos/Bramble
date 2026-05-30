@@ -8,13 +8,13 @@ version = "0.1.0"
 description = "Self-hosted MCP server providing a shared development journal across projects."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "Proprietary" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "leratos" }]
 keywords = ["mcp", "journal", "fastmcp", "sqlite"]
 classifiers = [
     "Programming Language :: Python :: 3.12",
     "Operating System :: OS Independent",
-    "Private :: Do Not Upload",
+    "License :: OSI Approved :: Apache Software License",
 ]
 
 # Runtime-Deps. FastMCP-Range gemäss Entscheidung A im Phase-2-Konzept,
