@@ -25,6 +25,13 @@ bramble
 
 Bramble nutzt das eigene Bramble-MCP-Journal als aktives Projektgedächtnis.
 
+Die geteilten, projektübergreifenden Journal-Konventionen (Status, Tags,
+Korrektur- und `resolves`-Modell, Open-Item-Semantik, Session-Start/Ende,
+DoD) sind kanonisch über das MCP-Tool `journal_guide()` abrufbar. Rufe es
+zu Beginn jeder Sitzung auf und befolge es; dieses Dokument ergänzt den
+Guide nur um Bramble-Repo-Spezifika (Test-Runner, Layout, Deployment) und
+wiederholt die geteilten Regeln nicht.
+
 Zu Beginn einer Arbeitssitzung:
 
 - Bevorzuge einen kuratierten Start mit

@@ -53,10 +53,14 @@ kopiert.
 
 ## Erwartete Tools
 
-Der Client sollte nach erfolgreicher Verbindung diese Tools sehen:
+Der Client sollte nach erfolgreicher Verbindung diese Tools sehen. Die
+maßgebliche, stets aktuelle Referenz für Arbeitsablauf und Konventionen
+ist `journal_guide()` (Single Source of Truth, am Session-Start aufrufen);
+die folgende Tabelle ist nur eine Übersicht.
 
 | Tool | Nutzung |
 | --- | --- |
+| `journal_guide()` | Kanonische, projektübergreifende Arbeitskonventionen (zuerst aufrufen) |
 | `journal_read(project, n=80)` | Letzte Einträge eines Projekts lesen |
 | `journal_append(project, status, content, phase=None, title=None)` | Neuen Eintrag schreiben |
 | `journal_search(project, query, limit=20)` | Volltextsuche in einem Projekt |
@@ -74,6 +78,10 @@ und Suchen bleiben projektübergreifend.
 
 Zu Beginn einer Bramble-Session:
 
+0. Einmal `journal_guide()` aufrufen und befolgen. Das liefert die
+  verbindlichen, projektübergreifenden Konventionen (Status, Tags,
+  Korrektur-/`resolves`-Modell, Open-Item-Semantik, DoD). Die folgenden
+  Schritte sind die Bramble-spezifische Anwendung davon.
 1. Bevorzugt `journal_context(project="bramble", n_recent=10)` aufrufen.
   Fallback: `journal_read(project="bramble", n=20)`.
 2. Bei unklarer Historie gezielt suchen, z. B.
@@ -160,22 +168,50 @@ Ergänzt den Eintrag "<alter Titel>" um ...
 ```text
 Nutze Bramble als projektbezogenes Entwicklungsjournal.
 
-Projekt: bramble
+Projekt: <projekt>
 
-Zu Beginn relevanter Arbeit rufe bevorzugt
-journal_context(project="bramble", n_recent=10) auf.
-Alternativ journal_read(project="bramble", n=20).
-Suche bei Bedarf mit journal_search(project="bramble", query=...)
-oder projektuebergreifend mit journal_search_all(query=...).
-Schreibe am Ende substanzieller Arbeit einen journal_append-Eintrag.
-Bestehende Einträge werden nicht geändert; Korrekturen erfolgen als neue
-bugfix- oder notiz-Einträge, die den alten Eintrag referenzieren.
-Nutze nur Statuswerte: in_arbeit, abgeschlossen, notiz, bugfix.
+Rufe zu Beginn jeder Session journal_guide() auf und befolge die dort
+beschriebenen Konventionen (Status, Tags, append-only-Korrekturen,
+Open-Item-/resolves-Semantik, DoD). Lies dann
+journal_context(project="<projekt>", n_recent=10) (Fallback:
+journal_read). Schreibe am Ende substanzieller Arbeit einen
+journal_append-Eintrag.
+```
+
+## Projekt-AGENTS.md-Vorlage
+
+Andere Beeren-Projekte sollen die geteilten Konventionen **nicht** in ihr
+`AGENTS.md` kopieren, sondern auf `journal_guide()` verweisen. Damit gibt
+es eine Quelle und keinen Copy-Paste-Drift. Minimaler Baustein für das
+`AGENTS.md` eines anderen Projekts:
+
+```markdown
+## Projektgedächtnis
+
+Projekt: <projekt-kebab>
+
+Aktives Projektgedächtnis ist das Bramble-MCP-Journal
+(https://journal.last-strawberry.com/mcp/, projektgebundenes Token).
+
+Zu Beginn jeder Session:
+1. `journal_guide()` aufrufen und befolgen — die kanonischen, geteilten
+   Journal-Konventionen (Status, Tags, Korrektur-/`resolves`-Modell,
+   Open-Item-Semantik, Session-Start/Ende, DoD). Nicht hier wiederholen.
+2. `journal_context(project="<projekt-kebab>", n_recent=10)` lesen.
+
+Dieses Dokument ergänzt den Guide nur um Projekt-Spezifika (Tech-Stack,
+Test-Runner, Repo-Layout, Branch-Konventionen).
 ```
 
 ## Verifikation eines neuen Clients
 
-1. Tool-Liste prüfen: alle acht Bramble-Tools müssen sichtbar sein.
+1. Tool-Liste prüfen: alle neun Bramble-Tools müssen sichtbar sein.
+1. Konventionen abrufen:
+
+```text
+journal_guide()
+```
+
 1. Lesen testen:
 
 ```text

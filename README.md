@@ -68,11 +68,12 @@ synchronisiert über drei Trigger (insert/update/delete).
 
 ### MCP-Tools
 
-Acht Tools auf dem `JournalMCPServer`, jedes mit `ToolError`-konformer
+Neun Tools auf dem `JournalMCPServer`, jedes mit `ToolError`-konformer
 Fehlerübersetzung:
 
 | Tool | Zweck |
 | --- | --- |
+| `journal_guide()` | Kanonische, projektübergreifende Arbeitskonventionen (Single Source of Truth, am Session-Start aufrufen) |
 | `journal_read(project, n=80)` | Neueste `n` Einträge für ein Projekt, neueste zuerst |
 | `journal_append(project, status, content, phase=None, title=None)` | Neuen Eintrag schreiben; Timestamp wird serverseitig gesetzt |
 | `journal_search(project, query, limit=20)` | FTS5-Volltextsuche, MATCH-Syntax durchgereicht |
