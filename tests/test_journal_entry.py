@@ -212,6 +212,18 @@ class TestJournalEntryValidation:
                 links=[{"to_entry_id": 1, "relation": "edits"}],
             )
 
+    def test_accepts_resolves_link_relation(self) -> None:
+        entry = JournalEntry(
+            project="bramble",
+            status=JournalStatus.ABGESCHLOSSEN,
+            content="closes prior work",
+            links=[{"to_entry_id": 7, "relation": "resolves"}],
+        )
+
+        assert entry.links == (
+            JournalEntryLink(entry_id=7, relation="resolves"),
+        )
+
     def test_rejects_non_positive_link_entry_id(self) -> None:
         with pytest.raises(ValueError, match="positive"):
             JournalEntry(

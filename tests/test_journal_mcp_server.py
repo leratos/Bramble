@@ -12,7 +12,7 @@ from fastmcp.exceptions import ToolError
 
 from bramble.auth_validator import AuthValidator
 from bramble.journal_db import JournalDB
-from bramble.journal_entry import JournalEntry, JournalStatus
+from bramble.journal_entry import JournalEntry, JournalEntryLink, JournalStatus
 from bramble.journal_mcp_server import (
     JournalMCPServer,
     _AuthRateLimitMiddleware,
@@ -1016,6 +1016,66 @@ class TestJournalOpenItems:
                 await client.call_tool(
                     "journal_open_items", {"limit": 101}
                 )
+
+    async def test_rows_carry_open_state_annotations(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content="open work",
+            )
+        )
+
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_open_items", {"project": "bramble", "limit": 10}
+            )
+
+        row = result.data[0]
+        assert row["open_state"] in ("open", "stale")
+        assert row["resolution_reason"] is None
+        assert row["resolved_by_id"] is None
+        assert isinstance(row["age_days"], int)
+
+    async def test_resolved_hidden_by_default_shown_with_flag(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        open_entry = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                content="wip",
+            )
+        )
+        closer = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.ABGESCHLOSSEN,
+                content="done",
+                links=(
+                    JournalEntryLink(entry_id=open_entry.id, relation="resolves"),
+                ),
+            )
+        )
+
+        async with Client(server.app) as client:
+            default = await client.call_tool(
+                "journal_open_items", {"project": "elder-berry"}
+            )
+            with_resolved = await client.call_tool(
+                "journal_open_items",
+                {"project": "elder-berry", "include_resolved": True},
+            )
+
+        assert default.data == []
+        assert len(with_resolved.data) == 1
+        row = with_resolved.data[0]
+        assert row["id"] == open_entry.id
+        assert row["open_state"] == "resolved"
+        assert row["resolution_reason"] == "link"
+        assert row["resolved_by_id"] == closer.id
 
 
 # ---------------------------------------------------------------------------

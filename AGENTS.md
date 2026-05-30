@@ -62,6 +62,17 @@ Während der Arbeit:
   ...)` schreiben.
 - Nach abgeschlossener substantieller Arbeit: einen Abschluss-Eintrag mit
   `journal_append(project="bramble", status="abgeschlossen", ...)` schreiben.
+- Open-Items schließen (append-only): Sobald Phase 4f deployed ist, den
+  Abschluss-Eintrag per Link `resolves -> <id des in_arbeit-Eintrags>`
+  verknüpfen. Das ist das zuverlässigste Schließsignal für
+  `journal_open_items`/`journal_context`; der alte Eintrag wird nicht
+  verändert.
+- "Offen" wird inferiert, nicht nur am Status abgelesen:
+  `journal_open_items` blendet effektiv geschlossene Items aus und markiert
+  alte unresolved-Items als `stale` (`open_state`/`resolution_reason` im
+  Output). Echten Backlog (noch nicht begonnene Folgearbeit) als schlanken
+  `in_arbeit`-Eintrag mit klarem nächstem Schritt führen — sonst findet ihn
+  kein Tool.
 - Erlaubte Statuswerte: `in_arbeit`, `abgeschlossen`, `notiz`, `bugfix`.
 - Tags (max. 5, lowercase-kebab) aus dem kontrollierten Vokabular: `decision`,
   `deployment`, `security`, `backup`, `import`, `admin-ui`, `test`, `docs`,

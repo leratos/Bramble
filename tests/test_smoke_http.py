@@ -239,7 +239,10 @@ def test_run_smoke_write_light_success(monkeypatch: pytest.MonkeyPatch) -> None:
                     "decisions": [],
                 },
             ),
-            ("journal_open_items", [{"id": alpha["id"], "status": "in_arbeit"}]),
+            (
+                "journal_open_items",
+                [{"id": alpha["id"], "status": "in_arbeit", "open_state": "open"}],
+            ),
             (
                 "journal_append",
                 smoke_http.ToolError("token is bound to another project"),

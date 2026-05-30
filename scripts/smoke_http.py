@@ -276,6 +276,9 @@ async def run_smoke(url: str, token: str, project: str, mode: str) -> int:
             if any(row.get("status") != "in_arbeit" for row in open_items):
                 fail("journal_open_items returned non in_arbeit rows")
                 return 1
+            if any("open_state" not in row for row in open_items):
+                fail("journal_open_items rows missing open_state annotation")
+                return 1
             ok("digest/open-items calls succeeded")
 
             section("journal_list_projects")
@@ -463,6 +466,9 @@ async def run_smoke(url: str, token: str, project: str, mode: str) -> int:
         open_item_ids = {entry["id"] for entry in open_items}
         if alpha["id"] not in open_item_ids:
             fail("open items did not include the current run's in_arbeit entries")
+            return 1
+        if any("open_state" not in row for row in open_items):
+            fail("journal_open_items rows missing open_state annotation")
             return 1
         ok("open items includes current run entries")
 

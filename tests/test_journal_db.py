@@ -12,6 +12,14 @@ from bramble.journal_db import JournalDB
 from bramble.journal_context import JournalContext
 from bramble.journal_digest import JournalDigest
 from bramble.journal_entry import JournalEntry, JournalEntryLink, JournalStatus
+from bramble.open_item import (
+    REASON_LINK,
+    REASON_PHASE,
+    REASON_TEXT,
+    STATE_OPEN,
+    STATE_RESOLVED,
+    STATE_STALE,
+)
 from bramble.project_summary import ProjectSummary
 
 
@@ -42,6 +50,87 @@ class TestJournalDBInit:
         db = JournalDB(db_path)
         db.initialize()
         db.initialize()  # must not raise
+
+    def test_initialize_migrates_entry_links_relation_check(
+        self,
+        db_path: Path,
+    ) -> None:
+        # Simulate a pre-Phase-4f database whose journal_entry_links CHECK
+        # constraint predates the 'resolves' relation.
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                """
+                CREATE TABLE journal_entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project TEXT NOT NULL, timestamp TEXT NOT NULL,
+                    status TEXT NOT NULL, phase TEXT, title TEXT,
+                    content TEXT NOT NULL, actor TEXT, client TEXT, source TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE journal_entry_links (
+                    from_entry_id INTEGER NOT NULL
+                        REFERENCES journal_entries(id) ON DELETE CASCADE,
+                    to_entry_id INTEGER NOT NULL REFERENCES journal_entries(id),
+                    relation TEXT NOT NULL CHECK (
+                        relation IN (
+                            'corrects', 'adds_context_to', 'supersedes',
+                            'implements', 'relates_to'
+                        )
+                    ),
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (from_entry_id, to_entry_id, relation)
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO journal_entries (project, timestamp, status, content) "
+                "VALUES ('bramble', '2026-05-01T12:00:00+00:00', 'in_arbeit', 'open')"
+            )
+            conn.execute(
+                "INSERT INTO journal_entries (project, timestamp, status, content) "
+                "VALUES ('bramble', '2026-05-02T12:00:00+00:00', 'abgeschlossen', 'done')"
+            )
+            conn.execute(
+                "INSERT INTO journal_entry_links "
+                "(from_entry_id, to_entry_id, relation, created_at) "
+                "VALUES (2, 1, 'supersedes', '2026-05-02T12:00:00+00:00')"
+            )
+            # The pre-migration CHECK must reject 'resolves'.
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO journal_entry_links "
+                    "(from_entry_id, to_entry_id, relation, created_at) "
+                    "VALUES (2, 1, 'resolves', 'x')"
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+        db = JournalDB(db_path)
+        db.initialize()
+
+        # The existing link row survives the table rebuild.
+        with sqlite3.connect(db_path) as verify:
+            rows = verify.execute(
+                "SELECT from_entry_id, to_entry_id, relation "
+                "FROM journal_entry_links"
+            ).fetchall()
+        assert (2, 1, "supersedes") in rows
+
+        # 'resolves' is now accepted through the public append path.
+        resolved = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.ABGESCHLOSSEN,
+                content="resolve the open entry",
+                links=[{"to_entry_id": 1, "relation": "resolves"}],
+            )
+        )
+        assert resolved.id is not None
 
     def test_initialize_creates_parent_directory(self, tmp_path: Path) -> None:
         nested = tmp_path / "deep" / "deeper" / "bramble.db"
@@ -722,6 +811,35 @@ class TestOpenItems:
 
         assert result == []
 
+    def test_open_items_excludes_entries_closed_via_resolves_link(
+        self,
+        db: JournalDB,
+    ) -> None:
+        open_entry = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                content="work in progress",
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.ABGESCHLOSSEN,
+                content="closed by explicit resolves link",
+                links=(
+                    JournalEntryLink(
+                        entry_id=open_entry.id,
+                        relation="resolves",
+                    ),
+                ),
+            )
+        )
+
+        result = db.open_items(project="elder-berry", limit=10)
+
+        assert result == []
+
     def test_open_items_excludes_entries_closed_via_textual_id_mapping(
         self,
         db: JournalDB,
@@ -994,6 +1112,224 @@ class TestOpenItems:
 
 
 # ---------------------------------------------------------------------------
+# open_items_view()
+# ---------------------------------------------------------------------------
+class TestOpenItemsView:
+    def test_classifies_open_and_stale_by_cutoff(self, db: JournalDB) -> None:
+        now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
+        recent = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content="recent",
+                timestamp=now - timedelta(days=3),
+            )
+        )
+        old = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content="old",
+                timestamp=now - timedelta(days=40),
+            )
+        )
+
+        views = db.open_items_view(project="bramble", now=now)
+        by_id = {view.entry.id: view for view in views}
+
+        assert by_id[recent.id].state == STATE_OPEN
+        assert by_id[recent.id].age_days == 3
+        assert by_id[old.id].state == STATE_STALE
+        assert by_id[old.id].age_days == 40
+
+        tighter = db.open_items_view(project="bramble", stale_after_days=2, now=now)
+        assert {v.entry.id: v.state for v in tighter} == {
+            recent.id: STATE_STALE,
+            old.id: STATE_STALE,
+        }
+
+    def test_resolved_via_link_carries_provenance(self, db: JournalDB) -> None:
+        open_entry = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                content="wip",
+            )
+        )
+        closer = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.ABGESCHLOSSEN,
+                content="done",
+                links=(
+                    JournalEntryLink(entry_id=open_entry.id, relation="resolves"),
+                ),
+            )
+        )
+
+        # Resolved items are hidden by default.
+        assert db.open_items_view(project="elder-berry") == []
+
+        views = db.open_items_view(project="elder-berry", include_resolved=True)
+        assert len(views) == 1
+        view = views[0]
+        assert view.entry.id == open_entry.id
+        assert view.state == STATE_RESOLVED
+        assert view.resolution_reason == REASON_LINK
+        assert view.resolved_by_id == closer.id
+
+    def test_resolved_via_text_mapping_carries_provenance(
+        self,
+        db: JournalDB,
+    ) -> None:
+        open_a = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                content="slice A",
+            )
+        )
+        mapper = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.NOTIZ,
+                content=f"Open-Items-Abgleich\n- #{open_a.id} -> #999",
+            )
+        )
+
+        views = db.open_items_view(project="elder-berry", include_resolved=True)
+        view = next(v for v in views if v.entry.id == open_a.id)
+        assert view.state == STATE_RESOLVED
+        assert view.resolution_reason == REASON_TEXT
+        assert view.resolved_by_id == mapper.id
+
+    def test_phase_heuristic_ignores_notiz_but_honors_abgeschlossen(
+        self,
+        db: JournalDB,
+    ) -> None:
+        now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
+        open_entry = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                phase="Phase 9",
+                content="start",
+                timestamp=now - timedelta(hours=2),
+            )
+        )
+        # A notiz sharing the phase must NOT close the item.
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.NOTIZ,
+                phase="Phase 9",
+                content="just a note",
+                timestamp=now - timedelta(hours=1),
+            )
+        )
+
+        views = db.open_items_view(
+            project="elder-berry", include_resolved=True, now=now
+        )
+        assert [v.state for v in views] == [STATE_OPEN]
+
+        # An abgeschlossen sharing the phase DOES close it, with provenance.
+        closer = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.ABGESCHLOSSEN,
+                phase="Phase 9",
+                content="phase done",
+                timestamp=now,
+            )
+        )
+        view = db.open_items_view(
+            project="elder-berry", include_resolved=True, now=now
+        )[0]
+        assert view.state == STATE_RESOLVED
+        assert view.resolution_reason == REASON_PHASE
+        assert view.resolved_by_id == closer.id
+
+    def test_explicit_link_reason_beats_phase_heuristic(
+        self,
+        db: JournalDB,
+    ) -> None:
+        now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
+        open_entry = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                phase="Phase 12",
+                content="start",
+                timestamp=now - timedelta(hours=2),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.ABGESCHLOSSEN,
+                phase="Phase 12",
+                content="phase done",
+                timestamp=now - timedelta(hours=1),
+            )
+        )
+        resolver = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.ABGESCHLOSSEN,
+                content="explicit resolve",
+                links=(
+                    JournalEntryLink(entry_id=open_entry.id, relation="resolves"),
+                ),
+                timestamp=now,
+            )
+        )
+
+        view = db.open_items_view(
+            project="elder-berry", include_resolved=True, now=now
+        )[0]
+        assert view.resolution_reason == REASON_LINK
+        assert view.resolved_by_id == resolver.id
+
+    def test_open_items_keeps_item_when_only_notiz_shares_phase(
+        self,
+        db: JournalDB,
+    ) -> None:
+        # Regression for the heuristic tightening: a notiz no longer closes
+        # work via the phase path, so the legacy open_items() keeps the item.
+        open_entry = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                phase="Phase 50",
+                content="start",
+                timestamp=datetime(2026, 5, 29, 10, 0, tzinfo=UTC),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.NOTIZ,
+                phase="Phase 50",
+                content="note in same phase",
+                timestamp=datetime(2026, 5, 29, 11, 0, tzinfo=UTC),
+            )
+        )
+
+        result = db.open_items(project="elder-berry", limit=10)
+
+        assert [entry.id for entry in result] == [open_entry.id]
+
+    def test_rejects_non_positive_stale_after_days(self, db: JournalDB) -> None:
+        with pytest.raises(ValueError, match="positive"):
+            db.open_items_view(stale_after_days=0)
+
+    def test_rejects_non_bool_include_resolved(self, db: JournalDB) -> None:
+        with pytest.raises(TypeError):
+            db.open_items_view(include_resolved="yes")  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
 # context()
 # ---------------------------------------------------------------------------
 class TestContext:
@@ -1042,7 +1378,9 @@ class TestContext:
         assert isinstance(context, JournalContext)
         assert context.project == "bramble"
         assert len(context.recent) == 2
-        assert [entry.status.value for entry in context.open_items] == ["in_arbeit"]
+        assert [view.entry.status.value for view in context.open_items] == [
+            "in_arbeit"
+        ]
         assert [entry.status.value for entry in context.recent_bugfixes] == ["bugfix"]
         assert [entry.title for entry in context.recent_decisions] == [
             "Decision: keep context deterministic"
@@ -1050,6 +1388,49 @@ class TestContext:
         assert "elder-berry" in context.related_projects
         assert "Phase 4d" in context.suggested_searches
         assert "deployment" in context.suggested_searches
+
+    def test_context_open_items_use_closure_inference_not_30d_window(
+        self,
+        db: JournalDB,
+    ) -> None:
+        # The old context slice used digest.open_items (raw in_arbeit within
+        # the 30-day window): it over-reported resolved items inside the
+        # window and dropped genuinely-open items older than 30 days. The
+        # unified slice fixes both.
+        now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
+        started = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                phase="Phase 1",
+                content="phase 1 start (resolved, but inside 30d window)",
+                timestamp=now - timedelta(days=10),
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.ABGESCHLOSSEN,
+                phase="Phase 1",
+                content="phase 1 done",
+                timestamp=now - timedelta(days=9),
+            )
+        )
+        genuinely_open = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                phase="Phase 2",
+                content="phase 2 still open, older than 30 days",
+                timestamp=now - timedelta(days=60),
+            )
+        )
+
+        context = db.context("bramble", n_recent=10, include_cross_project=False)
+        ids = [view.entry.id for view in context.open_items]
+
+        assert started.id not in ids  # resolved -> excluded
+        assert genuinely_open.id in ids  # >30d but unresolved -> still shown
 
     def test_context_empty_project_returns_empty_lists(self, db: JournalDB) -> None:
         context = db.context("berry-gym")
