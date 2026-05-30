@@ -126,7 +126,8 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
                 'adds_context_to',
                 'supersedes',
                 'implements',
-                'relates_to'
+                'relates_to',
+                'resolves'
             )
         ),
         created_at     TEXT NOT NULL,
@@ -235,6 +236,7 @@ class JournalDB:
             for statement in _SCHEMA_STATEMENTS:
                 conn.execute(statement)
             _migrate_journal_entry_metadata_columns(conn)
+            _migrate_entry_links_relation_check(conn)
             _migrate_projects_from_entries(conn)
             conn.commit()
         logger.info("JournalDB initialised at %s (journal_mode=%s)", self._db_path, mode)
@@ -871,6 +873,71 @@ def _migrate_journal_entry_metadata_columns(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE journal_entries ADD COLUMN {column} TEXT")
 
 
+def _migrate_entry_links_relation_check(conn: sqlite3.Connection) -> None:
+    """Widen the ``journal_entry_links`` relation CHECK to include ``resolves``.
+
+    ``CREATE TABLE IF NOT EXISTS`` only creates the table for fresh
+    databases; an already-initialised database keeps its original CHECK
+    constraint, which would reject ``resolves`` links. SQLite cannot ALTER
+    a CHECK constraint in place, so this rebuilds the table once,
+    preserving every existing link row. The function is idempotent: it
+    no-ops once the constraint text already mentions ``resolves``.
+
+    Nothing references ``journal_entry_links`` via a foreign key, so the
+    rebuild does not need to toggle ``PRAGMA foreign_keys``; the only
+    foreign key is the table's own reference to ``journal_entries``, and
+    every copied row already satisfied it.
+    """
+
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master "
+        "WHERE type = 'table' AND name = 'journal_entry_links'"
+    ).fetchone()
+    if row is None:
+        # Table not present yet (will be created fresh with the new CHECK).
+        return
+    existing_sql = row["sql"] or ""
+    if "'resolves'" in existing_sql:
+        return
+
+    conn.execute(
+        "ALTER TABLE journal_entry_links RENAME TO journal_entry_links_old"
+    )
+    conn.execute(
+        """
+        CREATE TABLE journal_entry_links (
+            from_entry_id  INTEGER NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+            to_entry_id    INTEGER NOT NULL REFERENCES journal_entries(id),
+            relation       TEXT NOT NULL CHECK (
+                relation IN (
+                    'corrects',
+                    'adds_context_to',
+                    'supersedes',
+                    'implements',
+                    'relates_to',
+                    'resolves'
+                )
+            ),
+            created_at     TEXT NOT NULL,
+            PRIMARY KEY (from_entry_id, to_entry_id, relation)
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO journal_entry_links
+            (from_entry_id, to_entry_id, relation, created_at)
+        SELECT from_entry_id, to_entry_id, relation, created_at
+        FROM journal_entry_links_old
+        """
+    )
+    conn.execute("DROP TABLE journal_entry_links_old")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entry_links_to "
+        "ON journal_entry_links(to_entry_id)"
+    )
+
+
 def _insert_entry_tags(
     conn: sqlite3.Connection,
     entry_id: int,
@@ -1258,7 +1325,9 @@ def _infer_closed_open_item_ids(
                     SELECT 1
                     FROM journal_entry_links l
                     WHERE l.from_entry_id = journal_entries.id
-                      AND l.relation IN ('corrects', 'supersedes', 'implements')
+                      AND l.relation IN (
+                          'resolves', 'corrects', 'supersedes', 'implements'
+                      )
                       AND l.to_entry_id IN ({placeholders})
                 )
           )
@@ -1282,7 +1351,9 @@ def _infer_closed_open_item_ids(
             JOIN journal_entries je ON je.id = l.from_entry_id
             WHERE je.project = ?
               AND je.status IN ({status_placeholders})
-              AND l.relation IN ('corrects', 'supersedes', 'implements')
+              AND l.relation IN (
+                  'resolves', 'corrects', 'supersedes', 'implements'
+              )
               AND l.to_entry_id IN ({placeholders})
             """,
             [project, *closing_statuses, *open_item_ids],

@@ -43,6 +43,87 @@ class TestJournalDBInit:
         db.initialize()
         db.initialize()  # must not raise
 
+    def test_initialize_migrates_entry_links_relation_check(
+        self,
+        db_path: Path,
+    ) -> None:
+        # Simulate a pre-Phase-4f database whose journal_entry_links CHECK
+        # constraint predates the 'resolves' relation.
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                """
+                CREATE TABLE journal_entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project TEXT NOT NULL, timestamp TEXT NOT NULL,
+                    status TEXT NOT NULL, phase TEXT, title TEXT,
+                    content TEXT NOT NULL, actor TEXT, client TEXT, source TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE journal_entry_links (
+                    from_entry_id INTEGER NOT NULL
+                        REFERENCES journal_entries(id) ON DELETE CASCADE,
+                    to_entry_id INTEGER NOT NULL REFERENCES journal_entries(id),
+                    relation TEXT NOT NULL CHECK (
+                        relation IN (
+                            'corrects', 'adds_context_to', 'supersedes',
+                            'implements', 'relates_to'
+                        )
+                    ),
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (from_entry_id, to_entry_id, relation)
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO journal_entries (project, timestamp, status, content) "
+                "VALUES ('bramble', '2026-05-01T12:00:00+00:00', 'in_arbeit', 'open')"
+            )
+            conn.execute(
+                "INSERT INTO journal_entries (project, timestamp, status, content) "
+                "VALUES ('bramble', '2026-05-02T12:00:00+00:00', 'abgeschlossen', 'done')"
+            )
+            conn.execute(
+                "INSERT INTO journal_entry_links "
+                "(from_entry_id, to_entry_id, relation, created_at) "
+                "VALUES (2, 1, 'supersedes', '2026-05-02T12:00:00+00:00')"
+            )
+            # The pre-migration CHECK must reject 'resolves'.
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO journal_entry_links "
+                    "(from_entry_id, to_entry_id, relation, created_at) "
+                    "VALUES (2, 1, 'resolves', 'x')"
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+        db = JournalDB(db_path)
+        db.initialize()
+
+        # The existing link row survives the table rebuild.
+        with sqlite3.connect(db_path) as verify:
+            rows = verify.execute(
+                "SELECT from_entry_id, to_entry_id, relation "
+                "FROM journal_entry_links"
+            ).fetchall()
+        assert (2, 1, "supersedes") in rows
+
+        # 'resolves' is now accepted through the public append path.
+        resolved = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.ABGESCHLOSSEN,
+                content="resolve the open entry",
+                links=[{"to_entry_id": 1, "relation": "resolves"}],
+            )
+        )
+        assert resolved.id is not None
+
     def test_initialize_creates_parent_directory(self, tmp_path: Path) -> None:
         nested = tmp_path / "deep" / "deeper" / "bramble.db"
         db = JournalDB(nested)
@@ -713,6 +794,35 @@ class TestOpenItems:
                     JournalEntryLink(
                         entry_id=open_entry.id,
                         relation="supersedes",
+                    ),
+                ),
+            )
+        )
+
+        result = db.open_items(project="elder-berry", limit=10)
+
+        assert result == []
+
+    def test_open_items_excludes_entries_closed_via_resolves_link(
+        self,
+        db: JournalDB,
+    ) -> None:
+        open_entry = db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.IN_ARBEIT,
+                content="work in progress",
+            )
+        )
+        db.append(
+            JournalEntry(
+                project="elder-berry",
+                status=JournalStatus.ABGESCHLOSSEN,
+                content="closed by explicit resolves link",
+                links=(
+                    JournalEntryLink(
+                        entry_id=open_entry.id,
+                        relation="resolves",
                     ),
                 ),
             )

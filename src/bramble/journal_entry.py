@@ -51,6 +51,11 @@ class JournalLinkRelation(StrEnum):
     SUPERSEDES = "supersedes"
     IMPLEMENTS = "implements"
     RELATES_TO = "relates_to"
+    # ``resolves`` is the explicit, append-only way to mark a prior
+    # ``in_arbeit`` entry as done from a later entry: the closing entry
+    # links ``resolves -> <open entry>``. It is the highest-confidence
+    # closing signal used by :meth:`JournalDB.open_items` (Phase 4f).
+    RESOLVES = "resolves"
 
 
 @dataclass(frozen=True, slots=True)
