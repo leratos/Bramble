@@ -68,6 +68,7 @@ die folgende Tabelle ist nur eine Übersicht.
 | `journal_context(project, n_recent=10, include_cross_project=True)` | Kuratierter Session-Startkontext fuer ein Projekt |
 | `journal_digest(...)` | Zeitraum-Digest mit Counts, offenen Punkten, Bugfixes und Entscheidungen |
 | `journal_open_items(project=None, limit=50)` | Offene Arbeitspunkte neueste zuerst, optional pro Projekt gefiltert |
+| `journal_resolve(project, resolves=[ids])` | Offene `in_arbeit`-Einträge per `resolves`-Link schließen; meldet geschlossene/übersprungene ids zurück |
 | `journal_list_projects()` | Projekte mit Counts und letzter Aktivität listen |
 
 `journal_append` ist an das Projekt des Tokens gebunden. Ein
@@ -205,7 +206,7 @@ Test-Runner, Repo-Layout, Branch-Konventionen).
 
 ## Verifikation eines neuen Clients
 
-1. Tool-Liste prüfen: alle neun Bramble-Tools müssen sichtbar sein.
+1. Tool-Liste prüfen: alle zehn Bramble-Tools müssen sichtbar sein.
 1. Konventionen abrufen:
 
 ```text

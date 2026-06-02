@@ -150,6 +150,7 @@ EXPECTED_TOOLS = {
     "journal_search_all",
     "journal_list_projects",
     "journal_guide",
+    "journal_resolve",
 }
 
 SMOKE_MODE_WRITE_LIGHT = "write-light"
