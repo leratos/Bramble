@@ -1,59 +1,59 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - Bramble Admin{% endblock %}
+{% block title %}{{ t('nav_dashboard') }} - Bramble Admin{% endblock %}
 
 {% block content %}
   <section class="page-head" aria-labelledby="dashboard-title">
     <div>
-      <p class="eyebrow">Betrieb</p>
-      <h1 id="dashboard-title">Dashboard</h1>
+      <p class="eyebrow">{{ t('eyebrow_operations') }}</p>
+      <h1 id="dashboard-title">{{ t('nav_dashboard') }}</h1>
     </div>
   </section>
 
-  <section class="metric-grid" aria-label="Statistik">
+  <section class="metric-grid" aria-label="{{ t('aria_statistics') }}">
     <article class="metric">
-      <span>Projekte</span>
+      <span>{{ t('metric_projects') }}</span>
       <strong>{{ stats.project_count }}</strong>
     </article>
     <article class="metric">
-      <span>Einträge</span>
+      <span>{{ t('metric_entries') }}</span>
       <strong>{{ stats.total_entries }}</strong>
     </article>
     <article class="metric">
-      <span>24 Stunden</span>
+      <span>{{ t('metric_24h') }}</span>
       <strong>{{ stats.entries_last_24h }}</strong>
     </article>
     <article class="metric">
-      <span>7 Tage</span>
+      <span>{{ t('metric_7d') }}</span>
       <strong>{{ stats.entries_last_7d }}</strong>
     </article>
     <article class="metric">
-      <span>30 Tage</span>
+      <span>{{ t('metric_30d') }}</span>
       <strong>{{ stats.entries_last_30d }}</strong>
     </article>
   </section>
 
-  <section class="metric-grid" aria-label="Kontext-Snapshot">
+  <section class="metric-grid" aria-label="{{ t('aria_context_snapshot') }}">
     <article class="metric">
-      <span>Offene Punkte</span>
+      <span>{{ t('metric_open_items') }}</span>
       <strong>{{ stats.open_item_count }}</strong>
     </article>
     <article class="metric">
-      <span>7 Tage Bugfixes</span>
+      <span>{{ t('metric_7d_bugfixes') }}</span>
       <strong>{{ stats.digest_7d.counts_by_status.get('bugfix', 0) }}</strong>
     </article>
     <article class="metric">
-      <span>7 Tage Entscheidungen</span>
+      <span>{{ t('metric_7d_decisions') }}</span>
       <strong>{{ stats.digest_7d.decisions|length }}</strong>
     </article>
     <article class="metric">
-      <span>Aktive Projekte 7 Tage</span>
+      <span>{{ t('metric_active_projects_7d') }}</span>
       <strong>{{ stats.digest_7d.projects|length }}</strong>
     </article>
   </section>
 
   <section class="entry-section" aria-labelledby="open-title">
-    <h2 id="open-title">Neueste offene Arbeitspunkte</h2>
+    <h2 id="open-title">{{ t('heading_recent_open') }}</h2>
     <div class="entry-list">
       {% for entry in stats.open_items %}
         <article class="entry">
@@ -79,13 +79,13 @@
           <p class="entry-content">{{ entry.content|admin_text }}</p>
         </article>
       {% else %}
-        <p class="empty-state">Keine offenen Punkte.</p>
+        <p class="empty-state">{{ t('empty_no_open') }}</p>
       {% endfor %}
     </div>
   </section>
 
   <section class="entry-section" aria-labelledby="recent-title">
-    <h2 id="recent-title">Letzte Einträge</h2>
+    <h2 id="recent-title">{{ t('heading_recent_entries') }}</h2>
     <div class="entry-list">
       {% for entry in stats.recent_entries %}
         <article class="entry">
@@ -116,21 +116,21 @@
             </p>
           {% endif %}
           {% if entry.tags %}
-            <div class="chip-list" aria-label="Tags">
+            <div class="chip-list" aria-label="{{ t('aria_tags') }}">
               {% for tag in entry.tags %}
                 <span>{{ tag }}</span>
               {% endfor %}
             </div>
           {% endif %}
           {% if entry.links %}
-            <div class="chip-list" aria-label="Links">
+            <div class="chip-list" aria-label="{{ t('aria_links') }}">
               {% for link in entry.links %}
                 <span>{{ link.relation.value }} #{{ link.entry_id }}</span>
               {% endfor %}
             </div>
           {% endif %}
           {% if entry.backlinks %}
-            <div class="chip-list" aria-label="Backlinks">
+            <div class="chip-list" aria-label="{{ t('aria_backlinks') }}">
               {% for link in entry.backlinks %}
                 <span>{{ link.relation.value }} from #{{ link.entry_id }}</span>
               {% endfor %}
@@ -139,7 +139,7 @@
           <p class="entry-content">{{ entry.content|admin_text }}</p>
         </article>
       {% else %}
-        <p class="empty-state">Noch keine Journal-Einträge.</p>
+        <p class="empty-state">{{ t('empty_no_entries') }}</p>
       {% endfor %}
     </div>
   </section>

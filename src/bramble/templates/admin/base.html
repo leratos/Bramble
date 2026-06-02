@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de">
+<html lang="{{ lang }}">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -12,24 +12,24 @@
         <span class="brand-mark" aria-hidden="true">B</span>
         <span>Bramble Admin</span>
       </a>
-      <nav aria-label="Hauptnavigation">
-        <a href="{{ url_for('dashboard') }}">Dashboard</a>
-        <a href="{{ url_for('projects') }}">Projekte</a>
-        <a href="{{ url_for('global_search') }}">Suche</a>
-        <a href="{{ url_for('help') }}">Hilfe</a>
-        <a href="{{ url_for('tokens') }}">Token</a>
+      <nav aria-label="{{ t('nav_main') }}">
+        <a href="{{ url_for('dashboard') }}">{{ t('nav_dashboard') }}</a>
+        <a href="{{ url_for('projects') }}">{{ t('nav_projects') }}</a>
+        <a href="{{ url_for('global_search') }}">{{ t('nav_search') }}</a>
+        <a href="{{ url_for('help') }}">{{ t('nav_help') }}</a>
+        <a href="{{ url_for('tokens') }}">{{ t('nav_tokens') }}</a>
       </nav>
       <form class="logout-form" method="post" action="{{ url_for('logout') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <span>{{ actor }}</span>
-        <button type="submit">Logout</button>
+        <button type="submit">{{ t('action_logout') }}</button>
       </form>
     </header>
 
     <div class="app-shell">
-      <aside class="sidebar" aria-label="Projektliste">
+      <aside class="sidebar" aria-label="{{ t('aria_project_list') }}">
         <div class="sidebar-head">
-          <h2>Projekte</h2>
+          <h2>{{ t('nav_projects') }}</h2>
           <span>{{ projects|length }}</span>
         </div>
         <nav class="project-nav">
@@ -40,11 +40,11 @@
             >
               <span class="project-name">{{ project.name }}</span>
               <span class="project-meta">
-                {{ project.entry_count }} Einträge
+                {{ project.entry_count }} {{ t('entries') }}
               </span>
             </a>
           {% else %}
-            <p class="empty-state">Noch keine Projekte.</p>
+            <p class="empty-state">{{ t('empty_no_projects') }}</p>
           {% endfor %}
         </nav>
       </aside>

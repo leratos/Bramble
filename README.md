@@ -184,7 +184,9 @@ bramble-admin --db ./data/bramble.db \
 The UI shows a dashboard, project list, project view and project search.
 Timestamps stay UTC in the database but are formatted in the admin UI with
 the display time zone (`--time-zone`, env `BRAMBLE_ADMIN_TIME_ZONE`, default
-`Europe/Berlin`), without seconds. It can also create, rotate and remove
+`Europe/Berlin`), without seconds. The UI is English by default; pass
+`--language de` (env `BRAMBLE_ADMIN_LANGUAGE`) for German. It can also
+create, rotate and remove
 project tokens. Existing token values are never shown; new or rotated tokens
 appear only directly in that action's response. After token changes,
 `bramble.service` must be restarted because the MCP server reads the token

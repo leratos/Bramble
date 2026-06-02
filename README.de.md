@@ -204,7 +204,9 @@ bramble-admin --db ./data/bramble.db \
 Die UI zeigt Dashboard, Projektliste, Projektansicht und Projektsuche.
 Zeitstempel bleiben in der DB UTC, werden in der Admin-UI aber mit der
 Anzeige-Zeitzone formatiert (`--time-zone`, Env `BRAMBLE_ADMIN_TIME_ZONE`,
-Default `Europe/Berlin`) und ohne Sekunden dargestellt.
+Default `Europe/Berlin`) und ohne Sekunden dargestellt. Die UI ist
+standardmäßig englisch; mit `--language de` (Env `BRAMBLE_ADMIN_LANGUAGE`)
+auf Deutsch.
 Zusaetzlich kann sie Projekt-Tokens erzeugen, rotieren und entfernen.
 Bestehende Tokenwerte werden nie angezeigt; neue oder rotierte Tokens
 erscheinen nur direkt in der Antwort dieser Aktion. Nach Token-

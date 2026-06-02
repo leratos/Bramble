@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de">
+<html lang="{{ lang }}">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -13,7 +13,7 @@
           <span class="brand-mark" aria-hidden="true">B</span>
           <div>
             <h1 id="login-title">Bramble Admin</h1>
-            <p>Interner Zugriff</p>
+            <p>{{ t('text_internal_access') }}</p>
           </div>
         </div>
         {% if error %}
@@ -22,14 +22,14 @@
         <form method="post" action="{{ url_for('login_submit') }}">
           <input type="hidden" name="next" value="{{ next_url }}">
           <label>
-            <span>User</span>
+            <span>{{ t('label_user') }}</span>
             <input name="username" autocomplete="username" required autofocus>
           </label>
           <label>
-            <span>Passwort</span>
+            <span>{{ t('label_password') }}</span>
             <input name="password" type="password" autocomplete="current-password" required>
           </label>
-          <button type="submit">Einloggen</button>
+          <button type="submit">{{ t('action_login') }}</button>
         </form>
       </section>
     </main>

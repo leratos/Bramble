@@ -10,6 +10,7 @@ from bramble.admin_config import (
     ENV_ADMIN_ALLOWED_HOSTS,
     ENV_ADMIN_COOKIE_SECURE,
     ENV_ADMIN_HOST,
+    ENV_ADMIN_LANGUAGE,
     ENV_ADMIN_PORT,
     ENV_ADMIN_SECRET_FILE,
     ENV_ADMIN_TIME_ZONE,
@@ -57,6 +58,19 @@ class TestAdminConfigConstruction:
                 display_timezone="Not/AZone",
             )
 
+    def test_default_language_is_english(self) -> None:
+        cfg = AdminConfig(db_path=Path("./data/bramble.db"))
+        assert cfg.language == "en"
+
+    def test_rejects_unknown_language(self) -> None:
+        with pytest.raises(ValueError, match="language"):
+            AdminConfig(db_path=Path("./data/bramble.db"), language="fr")
+
+    @pytest.mark.parametrize("language", ["en", "de"])
+    def test_accepts_supported_languages(self, language: str) -> None:
+        cfg = AdminConfig(db_path=Path("./data/bramble.db"), language=language)
+        assert cfg.language == language
+
 
 class TestAdminConfigFromSources:
     def test_env_overrides_defaults(self) -> None:
@@ -69,6 +83,7 @@ class TestAdminConfigFromSources:
             ENV_ADMIN_COOKIE_SECURE: "true",
             ENV_ADMIN_ALLOWED_HOSTS: "127.0.0.1,localhost,testserver",
             ENV_ADMIN_TIME_ZONE: "UTC",
+            ENV_ADMIN_LANGUAGE: "de",
         }
 
         cfg = AdminConfig.from_sources(argv=[], env=env)
@@ -81,6 +96,7 @@ class TestAdminConfigFromSources:
         assert cfg.cookie_secure is True
         assert cfg.allowed_hosts == ("127.0.0.1", "localhost", "testserver")
         assert cfg.display_timezone == "UTC"
+        assert cfg.language == "de"
 
     def test_cli_overrides_env(self) -> None:
         env = {

@@ -26,6 +26,7 @@ from bramble.admin_auth import (
     SessionStore,
 )
 from bramble.admin_config import AdminConfig
+from bramble.admin_i18n import make_translator
 from bramble.admin_read_model import AdminReadModel
 from bramble.admin_time import format_display_datetime, get_display_timezone
 from bramble.journal_db import JournalDB
@@ -131,6 +132,9 @@ def create_admin_app(
         lambda value: format_display_datetime(value, display_tz)
     )
     templates.env.filters["admin_text"] = _render_admin_text
+    # i18n: English-first, German optional, selected once via config.language.
+    templates.env.globals["t"] = make_translator(config.language)
+    templates.env.globals["lang"] = config.language
 
     routes = [
         Route("/", dashboard, methods=["GET"], name="dashboard"),
@@ -669,7 +673,7 @@ def _entry_from_assist_form(
 ) -> JournalEntry:
     title = _bounded_optional_text(
         assist_form.get("title"),
-        field_name="Titel",
+        field_name="Title",
         max_chars=_MAX_JOURNAL_TITLE_CHARS,
     )
     phase = _bounded_optional_text(
@@ -679,10 +683,10 @@ def _entry_from_assist_form(
     )
     content = (assist_form.get("content") or "").strip()
     if not content:
-        raise ValueError("Inhalt darf nicht leer sein.")
+        raise ValueError("Content must not be empty.")
     if len(content) > _MAX_JOURNAL_CONTENT_CHARS:
         raise ValueError(
-            f"Inhalt darf höchstens {_MAX_JOURNAL_CONTENT_CHARS} Zeichen lang sein."
+            f"Content must be at most {_MAX_JOURNAL_CONTENT_CHARS} characters."
         )
     tags = _parse_tag_input(assist_form.get("tags"))
     link_id = _positive_int_or_none(assist_form.get("link_entry_id"))
@@ -715,7 +719,7 @@ def _bounded_optional_text(
     if not stripped:
         return None
     if len(stripped) > max_chars:
-        raise ValueError(f"{field_name} darf höchstens {max_chars} Zeichen lang sein.")
+        raise ValueError(f"{field_name} must be at most {max_chars} characters.")
     return stripped
 
 
@@ -725,7 +729,7 @@ def _parse_tag_input(value: str | None) -> tuple[str, ...]:
         return ()
     if len(stripped) > _MAX_JOURNAL_TAGS_CHARS:
         raise ValueError(
-            f"Tags dürfen höchstens {_MAX_JOURNAL_TAGS_CHARS} Zeichen lang sein."
+            f"Tags must be at most {_MAX_JOURNAL_TAGS_CHARS} characters."
         )
     return tuple(tag.strip().lower() for tag in stripped.split(",") if tag.strip())
 
@@ -881,7 +885,7 @@ def _render_tokens(
         token_summaries = ctx.token_store.list_tokens()
     except ValueError as exc:
         token_summaries = []
-        error = error or f"Token-Datei konnte nicht gelesen werden: {exc}"
+        error = error or f"Could not read the token file: {exc}"
         token_status_code = max(status_code, 500)
     token_projects = {summary.project for summary in token_summaries}
     journal_projects = {project.name for project in projects}
