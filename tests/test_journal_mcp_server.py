@@ -1472,6 +1472,7 @@ class TestJournalResolve:
             "missing": [],
             "other_project": [],
             "not_in_arbeit": [],
+            "already_resolved": [],
         }
         assert result.data["entry"]["status"] == "notiz"
         assert result.data["entry"]["links"] == [
@@ -1513,7 +1514,34 @@ class TestJournalResolve:
             "missing": [999999],
             "other_project": [other_project.id],
             "not_in_arbeit": [done.id],
+            "already_resolved": [],
         }
+
+    async def test_retry_skips_already_resolved_item(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        open_entry = db.append(
+            JournalEntry(
+                project="bramble", status=JournalStatus.IN_ARBEIT, content="open"
+            )
+        )
+
+        async with Client(server.app) as client:
+            first = await client.call_tool(
+                "journal_resolve",
+                {"project": "bramble", "resolves": [open_entry.id]},
+            )
+            # Retry the same id: it is already resolved, so no second entry is
+            # written and it is reported under skipped, not resolved.
+            second = await client.call_tool(
+                "journal_resolve",
+                {"project": "bramble", "resolves": [open_entry.id]},
+            )
+
+        assert first.data["resolved"] == [open_entry.id]
+        assert second.data["resolved"] == []
+        assert second.data["entry"] is None
+        assert second.data["skipped"]["already_resolved"] == [open_entry.id]
 
     async def test_no_resolvable_targets_writes_no_entry(
         self, server: JournalMCPServer, db: JournalDB

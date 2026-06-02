@@ -1361,6 +1361,27 @@ class TestClassifyResolveTargets:
             12345: "missing",
         }
 
+    def test_already_resolved_in_arbeit_is_skipped(self, db: JournalDB) -> None:
+        open_entry = db.append(
+            JournalEntry(
+                project="bramble", status=JournalStatus.IN_ARBEIT, content="open"
+            )
+        )
+        # Close it with an explicit resolves-link entry: it stays in_arbeit but
+        # the open-item inference now treats it as resolved.
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.NOTIZ,
+                content="closes it",
+                links=[{"to_entry_id": open_entry.id, "relation": "resolves"}],
+            )
+        )
+
+        result = db.classify_resolve_targets("bramble", [open_entry.id])
+
+        assert result == {open_entry.id: "already_resolved"}
+
     def test_dedupes_and_preserves_order(self, db: JournalDB) -> None:
         a = db.append(
             JournalEntry(project="bramble", status=JournalStatus.IN_ARBEIT, content="a")

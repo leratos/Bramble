@@ -664,8 +664,13 @@ class JournalDB:
         For each requested id (deduplicated, original order preserved) return
         one of:
 
-        * ``"open"`` – exists, belongs to ``project`` and is ``in_arbeit`` →
-          can be closed with a ``resolves`` link.
+        * ``"open"`` – exists, belongs to ``project``, is ``in_arbeit`` and is
+          NOT already effectively closed → can be closed with a ``resolves``
+          link.
+        * ``"already_resolved"`` – ``in_arbeit`` in ``project`` but the
+          open-item inference already treats it as closed (an existing
+          ``resolves``/text/phase/title signal). Resolving it again would
+          append a redundant entry and misreport, so it is skipped.
         * ``"missing"`` – no entry with that id.
         * ``"other_project"`` – exists but belongs to a different project.
         * ``"not_in_arbeit"`` – exists in ``project`` but is not ``in_arbeit``
@@ -687,6 +692,7 @@ class JournalDB:
         found = {int(row["id"]): (row["project"], row["status"]) for row in rows}
 
         result: dict[int, str] = {}
+        in_arbeit_candidates: list[int] = []
         for target_id in target_ids:
             if target_id not in found:
                 result[target_id] = "missing"
@@ -697,8 +703,24 @@ class JournalDB:
             elif row_status != JournalStatus.IN_ARBEIT.value:
                 result[target_id] = "not_in_arbeit"
             else:
-                result[target_id] = "open"
-        return result
+                # Defer: an in_arbeit entry may already be effectively closed.
+                in_arbeit_candidates.append(target_id)
+
+        if in_arbeit_candidates:
+            # Use the same closure inference as journal_open_items so a retry
+            # does not re-close an already-resolved item (Codex P2).
+            already_resolved = {
+                view.entry.id
+                for view in self._open_item_views(project=project)
+                if view.is_resolved and view.entry.id is not None
+            }
+            for target_id in in_arbeit_candidates:
+                result[target_id] = (
+                    "already_resolved" if target_id in already_resolved else "open"
+                )
+
+        # Preserve the original (deduplicated) request order.
+        return {target_id: result[target_id] for target_id in target_ids}
 
     def open_items_view(
         self,

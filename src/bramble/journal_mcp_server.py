@@ -534,11 +534,13 @@ class JournalMCPServer:
             skipped, so the closure is verifiable.
 
             ``resolves`` must list ids of ``in_arbeit`` entries in ``project``.
-            Ids that are missing, belong to another project, or are not
-            ``in_arbeit`` are skipped (no link created) and listed under
-            ``skipped``. If nothing is resolvable, no entry is written. On the
-            authenticated ``http`` transport the bearer token is bound to one
-            project (Phase-3 Decision B).
+            Ids that are missing, belong to another project, are not
+            ``in_arbeit``, or are already effectively closed are skipped (no
+            link created) and listed under ``skipped`` (``missing`` /
+            ``other_project`` / ``not_in_arbeit`` / ``already_resolved``). If
+            nothing is resolvable, no entry is written. On the authenticated
+            ``http`` transport the bearer token is bound to one project
+            (Phase-3 Decision B).
             """
 
             _require_kebab_case(project)
@@ -554,6 +556,9 @@ class JournalMCPServer:
                 ],
                 "not_in_arbeit": [
                     t for t, s in classification.items() if s == "not_in_arbeit"
+                ],
+                "already_resolved": [
+                    t for t, s in classification.items() if s == "already_resolved"
                 ],
             }
 
