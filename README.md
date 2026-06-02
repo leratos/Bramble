@@ -1,62 +1,41 @@
 # Bramble
 
-Self-hosted MCP-Server für ein projektübergreifendes Entwicklungs-Journal.
+> 🌐 **Deutsche Version: [README.de.md](README.de.md).** English is the
+> authoritative version of this README.
 
-Bramble ist der zentrale "Brombeerstrauch", an dem alle Beeren-Projekte
-(Elder-Berry, Bull-Berry, Berry-Gym, Last-Strawberry, ...) hängen.
-Statt in jedem Repo eine eigene `docs/journal.txt` zu pflegen, schreiben
-alle Projekte ihre Journal-Einträge über das Model-Context-Protocol an
-einen gemeinsamen Server, der die Daten in einer SQLite-Datenbank
-ablegt und projektübergreifend durchsuchbar macht.
+Self-hosted MCP server for a cross-project development journal.
 
-> **Sicherheitsmodell (bitte zuerst lesen):** Bramble ist ein
-> Single-Owner-Werkzeug. Lesen und Suchen sind projektübergreifend — **jedes
-> gültige Token liest die Einträge aller Projekte**; nur das Schreiben ist
-> projektgebunden. Es gibt **keine Mandantentrennung** und das Tool ist nicht
-> dafür gedacht, fremde, gegenseitig misstrauende Nutzer auf einer Instanz zu
-> bedienen. Append-only bedeutet zudem kein Löschen. Details und
-> Betriebsempfehlungen: [SECURITY.md](SECURITY.md).
+Bramble is the central "bramble bush" that all the berry projects
+(Elder-Berry, Bull-Berry, Berry-Gym, Last-Strawberry, …) hang on. Instead
+of keeping a separate `docs/journal.txt` in every repo, all projects write
+their journal entries over the Model Context Protocol to one shared server,
+which stores the data in a SQLite database and makes it searchable across
+projects.
+
+> **Security model (read this first):** Bramble is a single-owner tool.
+> Reading and searching are cross-project — **any valid token reads the
+> entries of all projects**; only writing is project-bound. There is **no
+> tenant isolation**, and the tool is not meant to serve mutually distrusting
+> users on one instance. Append-only also means no deletion. See
+> [SECURITY.md](SECURITY.md) for details and operational guidance.
 
 ## Status
 
-In aktiver Entwicklung. **Phase 3 – Deployment & Härtung** ist
-abgeschlossen: Bramble läuft als systemd-Service hinter Plesk/Nginx auf
-`journal.last-strawberry.com`, mit Bearer-Token-Auth, Rate-Limit,
-Fail2Ban und WAL-sicherem SQLite-Betrieb. Das Borg-Backup inklusive
-Restore-Test ist verifiziert.
+Actively developed and running in production. Bramble runs as a systemd
+service behind a reverse proxy with bearer-token auth, per-token/per-IP rate
+limiting, Fail2Ban, and WAL-mode SQLite; the Borg backup including a restore
+test is verified. The journal itself is Bramble's active project memory —
+`docs/journal.txt` remains only as a historical import source and is no
+longer used for new entries.
 
-**Phase 4d (Kontexttools)** ist abgeschlossen und hostseitig im
-read-only Smoke verifiziert. Aktueller Fokus ist **Phase 4e**:
-verbindliche Journal-Workflows und operativer Rollout fuer Admin-UI und
-Agenten.
+## Architecture
 
-Ab Phase 4 ist Brambles aktives Projektgedaechtnis das MCP-Journal
-selbst. `docs/journal.txt` bleibt nur als historische Importquelle im
-Repo und wird nicht mehr fuer neue Eintraege verwendet.
+- Python 3.12, SQLite (FTS5 for full-text search), FastMCP 3.x
+- OOP, one class per file
+- Dependency injection through the constructor
+- Append-only: no `update`/`delete` tools — corrections are new entries
 
-## Phasen-Plan
-
-1. **Phase 1** – Repo-Setup, DB-Schema, Core-Klassen (JournalEntry,
-   JournalDB) mit Unit-Tests. ✅
-2. **Phase 2** – FastMCP-Server, vier MCP-Tools, CLI-Entry-Point,
-   lokal lauffähig. ✅
-3. **Phase 3** – Deployment auf `journal.last-strawberry.com`
-   (Plesk/Ubuntu), systemd, Nginx-Reverse-Proxy, Bearer-Token-Auth,
-   Rate-Limit, Fail2Ban. ✅
-4. **Phase 4** – Import bestehender `journal.txt`-Dateien,
-    Connector-Setup in Claude.ai und Claude Code. ✅
-5. **Phase 5** – Migration aller Projekt-System-Prompts auf die
-   MCP-Tools.
-
-## Architektur
-
-- Python 3.12, SQLite (FTS5 für Volltextsuche), FastMCP 3.x
-- OOP, eine Klasse pro Datei
-- Dependency Injection über den Konstruktor
-- Append-only: keine `update`/`delete`-Tools – Korrekturen erfolgen
-  über neue Einträge
-
-### Datenmodell
+### Data model
 
 ```sql
 CREATE TABLE journal_entries (
@@ -70,60 +49,58 @@ CREATE TABLE journal_entries (
 );
 ```
 
-Zusätzlich: Index `idx_project_ts` für schnelle `read`-Queries und
-eine FTS5-Tabelle `journal_fts` (indiziert `content` und `title`),
-synchronisiert über drei Trigger (insert/update/delete).
+Plus an `idx_project_ts` index for fast `read` queries and an FTS5 table
+`journal_fts` (indexing `content` and `title`), kept in sync by three
+triggers (insert/update/delete). Tags, links and actor/client/source
+metadata live in additional tables (see `src/bramble/journal_db.py`).
 
-### MCP-Tools
+> Note: the status values are stored verbatim as `in_arbeit`,
+> `abgeschlossen`, `notiz`, `bugfix` (German: in-progress, done, note,
+> bugfix). They are part of the data contract and are not translated.
 
-Zehn Tools auf dem `JournalMCPServer`, jedes mit `ToolError`-konformer
-Fehlerübersetzung:
+### MCP tools
 
-| Tool | Zweck |
+Ten tools on the `JournalMCPServer`, each with `ToolError`-conformant error
+translation:
+
+| Tool | Purpose |
 | --- | --- |
-| `journal_guide()` | Kanonische, projektübergreifende Arbeitskonventionen (Single Source of Truth, am Session-Start aufrufen) |
-| `journal_read(project, n=80)` | Neueste `n` Einträge für ein Projekt, neueste zuerst |
-| `journal_append(project, status, content, phase=None, title=None)` | Neuen Eintrag schreiben; Timestamp wird serverseitig gesetzt |
-| `journal_search(project, query, limit=20)` | FTS5-Volltextsuche, MATCH-Syntax durchgereicht |
-| `journal_search_all(...)` | Projektuebergreifende FTS5-Suche mit optionalen Filtern, maximal 100 Treffer |
-| `journal_context(project, n_recent=10, include_cross_project=True, full=False)` | Kuratierter Session-Startkontext (offene Punkte, Bugfixes, Entscheidungen, Related-Projects); `content` standardmäßig als Vorschau gekürzt (+ `content_chars`/`content_truncated`), `full=True` für Volltext |
-| `journal_digest(...)` | Strukturierter Zeitraum-Digest mit Counts und kuratierten Entry-Listen |
-| `journal_open_items(project=None, limit=50, include_resolved=False, stale_after_days=30)` | Offene Arbeitspunkte mit append-only-Closure-Inferenz; je Item `open_state` (`open`/`stale`/`resolved`), `resolution_reason`, `resolved_by_id`, `age_days`. Resolved standardmäßig ausgeblendet |
-| `journal_resolve(project, resolves=[ids], title=None, content=None)` | Schließt offene `in_arbeit`-Einträge: schreibt einen append-only-Eintrag mit `resolves`-Links auf die ids und meldet `resolved`/`skipped` (missing/anderes Projekt/nicht in_arbeit) zurück |
-| `journal_list_projects()` | `(project, entry_count, last_timestamp)` pro Projekt, neueste Aktivität zuerst |
+| `journal_guide()` | Canonical, project-agnostic working conventions (single source of truth, call at session start) |
+| `journal_read(project, n=80)` | Newest `n` entries for a project, newest first |
+| `journal_append(project, status, content, phase=None, title=None)` | Write a new entry; the timestamp is set server-side |
+| `journal_search(project, query, limit=20)` | FTS5 full-text search, MATCH syntax passed through |
+| `journal_search_all(...)` | Cross-project FTS5 search with optional filters, at most 100 hits |
+| `journal_context(project, n_recent=10, include_cross_project=True, full=False)` | Curated session-start context (open items, bugfixes, decisions, related projects); `content` is previewed (truncated) by default (+ `content_chars`/`content_truncated`), `full=True` for the full body |
+| `journal_digest(...)` | Structured time-range digest with counts and curated entry lists |
+| `journal_open_items(project=None, limit=50, include_resolved=False, stale_after_days=30)` | Open work items with append-only closure inference; per item `open_state` (`open`/`stale`/`resolved`), `resolution_reason`, `resolved_by_id`, `age_days`. Resolved items hidden by default |
+| `journal_resolve(project, resolves=[ids], title=None, content=None)` | Close open `in_arbeit` entries: writes one append-only entry with `resolves` links to the ids and reports `resolved`/`skipped` (missing / other project / not in_arbeit / already resolved) |
+| `journal_list_projects()` | `(project, entry_count, last_timestamp)` per project, most recent activity first |
 
-### Offene Punkte im append-only-Modell
+### Open items in the append-only model
 
-Das Journal ändert Einträge nie; ein Abschluss ist ein neuer Eintrag. Ein
-roher `status="in_arbeit"`-Filter würde daher jeden je gestarteten Eintrag
-für immer als offen melden. `journal_open_items` und der `open_items`-Slice
-von `journal_context` inferieren deshalb, welche Items effektiv erledigt
-sind, und liefern die Begründung mit:
+The journal never edits entries; a completion is a new entry. A raw
+`status="in_arbeit"` filter would therefore report every started entry as
+open forever. `journal_open_items` and the `open_items` slice of
+`journal_context` instead infer which items are effectively done, and
+return the reasoning:
 
-- Zuverlässigstes Schließsignal ist ein expliziter Link
-  `resolves -> <offener Eintrag>` vom Abschluss-Eintrag (Relation `resolves`,
-  Phase 4f). Auch `corrects`/`supersedes`/`implements` und ein
-  `#<offen> -> #<neu>`-Textverweis schließen explizit.
-- Ohne expliziten Verweis greift eine konservative Heuristik (späterer
-  `abgeschlossen`/`bugfix`-Eintrag mit gleicher Phase oder gleichem Titel).
-- Unaufgelöste Items, die älter als `stale_after_days` sind, werden als
-  `stale` markiert (nicht versteckt).
+- The most reliable close signal is an explicit `resolves -> <open entry>`
+  link from the closing entry (relation `resolves`). `corrects` /
+  `supersedes` / `implements` and a `#<open> -> #<new>` text reference also
+  close explicitly. The `journal_resolve` tool is the easiest way to write
+  these links.
+- Without an explicit reference, a conservative heuristic applies (a later
+  `abgeschlossen`/`bugfix` entry with the same phase or title).
+- Unresolved items older than `stale_after_days` are flagged `stale` (not
+  hidden).
 
-Details und Entscheidungen: `docs/concepts/phase-4f-open-items-resolution.md`.
+Details and decisions: `docs/concepts/phase-4f-open-items-resolution.md`
+(internal, German).
 
-Projekt-Identifier müssen im MCP-Layer kebab-case sein
-(`^[a-z0-9][a-z0-9-]*$`). `JournalDB` selbst bleibt projekt-agnostisch.
+Project identifiers must be kebab-case at the MCP layer
+(`^[a-z0-9][a-z0-9-]*$`). `JournalDB` itself stays project-agnostic.
 
 ## Setup
-
-```powershell
-# Lokales Setup (Windows)
-cd C:\Dev\Bramble
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-pytest
-```
 
 ```bash
 # Linux/macOS
@@ -134,33 +111,40 @@ pip install -e ".[dev]"
 pytest
 ```
 
-## Server starten
+```powershell
+# Windows
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+pytest
+```
 
-Nach `pip install -e .` ist der Console-Script-Entry-Point
-`bramble-server` verfügbar.
+## Running the server
 
-### stdio-Transport (für Claude Desktop / Claude Code)
+After `pip install -e .` the console-script entry point `bramble-server`
+is available.
+
+### stdio transport (for Claude Desktop / Claude Code)
 
 ```bash
 bramble-server --transport stdio
 ```
 
-### HTTP-Transport (authentifiziert)
+### HTTP transport (authenticated)
 
 ```bash
 bramble-server --transport http --host 127.0.0.1 --port 8765 \
     --tokens-file ./secrets/tokens.json --log-level INFO
 ```
 
-Der HTTP-Transport ist authentifiziert: jeder Tool-Call braucht ein
-`Authorization: Bearer <token>`-Header. Tokens werden mit
-`scripts/gen_token.py <projekt>` erzeugt. `journal_append` ist an das
-Projekt des Tokens gebunden; Lesen und Suchen bleiben
-projektübergreifend.
+The HTTP transport is authenticated: every tool call needs an
+`Authorization: Bearer <token>` header. Tokens are created with
+`scripts/gen_token.py <project>`. `journal_append` is bound to the token's
+project; reading and searching remain cross-project.
 
-### Konfiguration
+### Configuration
 
-Priorität: CLI-Argument > Umgebungsvariable > Default.
+Priority: CLI argument > environment variable > default.
 
 | CLI | Env | Default |
 | --- | --- | --- |
@@ -173,23 +157,23 @@ Priorität: CLI-Argument > Umgebungsvariable > Default.
 | `--rate-limit-per-token N` | `BRAMBLE_RATE_LIMIT_PER_TOKEN` | `60` |
 | `--rate-limit-per-ip N` | `BRAMBLE_RATE_LIMIT_PER_IP` | `120` |
 
-Logs werden als JSON auf stderr geschrieben (stdout ist beim stdio-Transport
-für das MCP-Protokoll reserviert).
+Logs are written as JSON to stderr (stdout is reserved for the MCP protocol
+on the stdio transport).
 
-### Admin-UI (Phase 4b)
+### Admin UI
 
-Der separate Admin-Server rendert Starlette/Jinja2-Views und bindet per
-Default nur an `127.0.0.1:8770`. Zugriff ist fuer den Betrieb per
-SSH-Tunnel gedacht, nicht ueber einen oeffentlichen Nginx/Plesk-Pfad.
+The separate admin server renders Starlette/Jinja2 views and binds by
+default only to `127.0.0.1:8770`. Access is meant to go through an SSH
+tunnel for operations, **not** through a public Nginx/Plesk path.
 
-Vor dem Start muss ein Argon2id-Secret existieren. Es gibt bewusst kein
-Default-Passwort:
+An Argon2id secret must exist before starting. There is deliberately no
+default password:
 
 ```bash
 python scripts/gen_admin_secret.py --output ./secrets/admin-ui.json
 ```
 
-Danach:
+Then:
 
 ```bash
 bramble-admin --db ./data/bramble.db \
@@ -197,78 +181,68 @@ bramble-admin --db ./data/bramble.db \
     --tokens-file ./secrets/tokens.json
 ```
 
-Die UI zeigt Dashboard, Projektliste, Projektansicht und Projektsuche.
-Zeitstempel bleiben in der DB UTC, werden in der Admin-UI aber mit der
-Anzeige-Zeitzone formatiert (`--time-zone`, Env `BRAMBLE_ADMIN_TIME_ZONE`,
-Default `Europe/Berlin`) und ohne Sekunden dargestellt.
-Zusaetzlich kann sie Projekt-Tokens erzeugen, rotieren und entfernen.
-Bestehende Tokenwerte werden nie angezeigt; neue oder rotierte Tokens
-erscheinen nur direkt in der Antwort dieser Aktion. Nach Token-
-Aenderungen muss `bramble.service` neu gestartet werden, weil der
-MCP-Server die Token-Datei beim Start liest.
+The UI shows a dashboard, project list, project view and project search.
+Timestamps stay UTC in the database but are formatted in the admin UI with
+the display time zone (`--time-zone`, env `BRAMBLE_ADMIN_TIME_ZONE`, default
+`Europe/Berlin`), without seconds. It can also create, rotate and remove
+project tokens. Existing token values are never shown; new or rotated tokens
+appear only directly in that action's response. After token changes,
+`bramble.service` must be restarted because the MCP server reads the token
+file at startup.
 
-Schreibende Admin-Aktionen sind CSRF-geschuetzt und werden in der
-append-only Tabelle `admin_audit_events` protokolliert. Login-Sessions
-bleiben serverseitig, das Cookie ist `HttpOnly` und `SameSite=Strict`;
-fehlende oder ungueltige Secrets brechen den Start ab.
+Writing admin actions are CSRF-protected and logged to the append-only
+`admin_audit_events` table. Login sessions are kept server-side, the cookie
+is `HttpOnly` and `SameSite=Strict`; missing or invalid secrets abort
+startup.
 
-### DB ohne Server vorbereiten
+### Preparing the DB without a server
 
 ```bash
-python scripts/init_db.py                # Default ./data/bramble.db
-python scripts/init_db.py /tmp/test.db   # explizit
-BRAMBLE_DB_PATH=/tmp/test.db python scripts/init_db.py  # per Env
+python scripts/init_db.py                # default ./data/bramble.db
+python scripts/init_db.py /tmp/test.db   # explicit
+BRAMBLE_DB_PATH=/tmp/test.db python scripts/init_db.py  # via env
 ```
 
-`init_db.py` ist idempotent. Beim Server-Start wird ohnehin
-`db.initialize()` aufgerufen; das Skript ist nur für Setups, in denen
-die DB getrennt vom Server-Lifecycle angelegt werden soll.
+`init_db.py` is idempotent. The server calls `db.initialize()` on startup
+anyway; the script is only for setups where the DB is created separately
+from the server lifecycle.
 
-## Manuelles End-to-End-Smoke-Testen
+## Manual end-to-end smoke testing
 
-`scripts/smoke_http.py` prüft die MCP-Tools gegen einen real
-laufenden HTTP-Server (kein Teil der pytest-Suite).
+`scripts/smoke_http.py` checks the MCP tools against a real running HTTP
+server (not part of the pytest suite).
 
-```powershell
+```bash
 # Terminal 1
 bramble-server --transport http --host 127.0.0.1 --port 8765 \
-    --tokens-file .\secrets\tokens.json --log-level INFO
+    --tokens-file ./secrets/tokens.json --log-level INFO
 
 # Terminal 2
-python scripts\smoke_http.py --token <bramble-token>
-# oder gegen einen anderen Endpoint:
-python scripts\smoke_http.py --url http://127.0.0.1:9000/mcp/ \
+python scripts/smoke_http.py --token <bramble-token>
+# or against a different endpoint:
+python scripts/smoke_http.py --url http://127.0.0.1:9000/mcp/ \
     --token <bramble-token>
-# read-only Variante ohne Test-Append:
-python scripts\smoke_http.py --token <bramble-token> --mode read-only
+# read-only variant without a test append:
+python scripts/smoke_http.py --token <bramble-token> --mode read-only
 ```
 
-Im Default (`--mode write-light`) schreibt der Smoke-Test zwei Einträge
-in die echte DB, liest zurück, sucht per FTS5, prüft
-`journal_context`/`journal_digest`/`journal_open_items`, Auth-Gate,
-Token-Scope und feuert Negativtests (unbekannter Status, non-kebab
-Projektname).
+By default (`--mode write-light`) the smoke test writes two entries to the
+real DB, reads them back, searches via FTS5, checks
+`journal_context`/`journal_digest`/`journal_open_items`, the auth gate and
+token scope, and fires negative tests (unknown status, non-kebab project
+name). With `--mode read-only` only read checks run, without a test append.
 
-Mit `--mode read-only` werden nur Lese-Checks ausgeführt, inklusive
-`journal_context`, `journal_digest`, `journal_open_items` und
-`journal_list_projects`, ohne Test-Append in die DB.
+## Importing legacy journals
 
-## Legacy-Journals importieren
+`docs/journal.txt` is already imported for Bramble itself and is no longer
+maintained. This section only covers importing old text journals from
+Bramble or other projects.
 
-`docs/journal.txt` ist fuer Bramble selbst bereits importiert und wird
-nicht weiter gepflegt. Dieser Abschnitt beschreibt nur den Import alter
-Textjournals aus Bramble oder anderen Projekten.
-
-`scripts/import_journal_txt.py` importiert bestehende
-`docs/journal.txt`-Dateien direkt in die SQLite-DB. Der Default ist ein
-Dry-Run; geschrieben wird nur mit `--execute`.
+`scripts/import_journal_txt.py` imports existing `docs/journal.txt` files
+straight into the SQLite DB. The default is a dry run; it only writes with
+`--execute`.
 
 ```bash
-python scripts/import_journal_txt.py \
-    --project bramble \
-    --source docs/journal.txt \
-    --db data/bramble.db
-
 python scripts/import_journal_txt.py \
     --project bramble \
     --source docs/journal.txt \
@@ -276,48 +250,43 @@ python scripts/import_journal_txt.py \
     --execute
 ```
 
-Der Import bewahrt das Journal-Datum, soweit es eindeutig parsebar ist.
-Datumseinträge ohne Uhrzeit werden auf `12:00:00+00:00` gesetzt.
-Identische Einträge werden im Execute-Modus übersprungen.
+The import preserves the journal date where it is unambiguously parseable.
+Date entries without a time are set to `12:00:00+00:00`. Identical entries
+are skipped in execute mode.
 
-## KI-Clients anbinden
+## Connecting AI clients
 
-MCP-fähige KI-Clients verbinden sich über den öffentlichen HTTP-
-Endpunkt und ein projektbezogenes Bearer-Token. Arbeitsregeln,
-Korrekturmodell und ein System-Prompt-Baustein stehen in
-[docs/ai-client-setup.md](docs/ai-client-setup.md).
+MCP-capable AI clients connect over the HTTP endpoint and a project-scoped
+bearer token. Working rules, the correction model and a system-prompt
+snippet are in [docs/ai-client-setup.md](docs/ai-client-setup.md).
 
-Fuer dieses Repo stehen die operativen Agentenregeln zusaetzlich in
+For this repo, the operational agent rules also live in
 [AGENTS.md](AGENTS.md).
 
-## Repo-Struktur
+## Repository layout
 
 ```text
 Bramble/
 ├── docs/
-│   ├── concepts/        # Phasen-Konzepte
+│   ├── concepts/        # phase concepts (internal, German)
 │   ├── ai-client-setup.md
-│   └── journal.txt      # Legacy-Importquelle; keine neuen Eintraege
-├── deploy/
-│   ├── bramble-backup-snapshot.sh
-│   ├── bramble-admin.service
-│   ├── bramble.service  # systemd-Unit
-│   └── fail2ban/        # Fail2Ban-Filter/Jail
+│   └── journal.txt      # legacy import source; no new entries
+├── deploy/              # example systemd/Nginx/Fail2Ban configs (adapt to your host)
 ├── scripts/
 │   ├── gen_admin_secret.py
-│   ├── gen_token.py     # Projekt-Token erzeugen/rotieren
+│   ├── gen_token.py     # create/rotate project tokens
 │   ├── import_journal_txt.py
-│   ├── init_db.py       # Migration / DB-Bootstrap
-│   └── smoke_http.py    # manuelles HTTP-Smoke-Skript
-├── src/bramble/         # Quellcode (eine Klasse pro Datei)
-└── tests/               # pytest-Tests
+│   ├── init_db.py       # migration / DB bootstrap
+│   └── smoke_http.py    # manual HTTP smoke script
+├── src/bramble/         # source (one class per file)
+└── tests/               # pytest tests
 ```
 
-## Lizenz
+## License
 
-Apache-2.0 — siehe [LICENSE](LICENSE) und [NOTICE](NOTICE). Beiträge werden
-unter denselben Bedingungen angenommen.
+Apache-2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Contributions are
+accepted under the same terms.
 
-Hinweis zu `deploy/`: Die dortigen systemd-Units, Nginx-Direktiven und
-Fail2Ban-Regeln sind **Beispiele** für den Referenz-Host (Domain, Pfade wie
-`/opt/bramble`). Passe sie an deine Umgebung an.
+Note on `deploy/`: the systemd units, Nginx directives and Fail2Ban rules
+there are **examples** for the reference host (domain, paths like
+`/opt/bramble`). Adapt them to your environment.

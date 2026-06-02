@@ -1,260 +1,258 @@
 # Bramble AI Client Setup
 
-Status: Arbeitsanleitung für Codex, Claude und andere MCP-fähige KI-
-Clients.
+Working guide for Codex, Claude and other MCP-capable AI clients.
 
-## Ziel
+## Goal
 
-KI-Clients sollen Bramble als gemeinsames Entwicklungsjournal nutzen:
+AI clients should use Bramble as a shared development journal:
 
-* alte Einträge lesen,
-* projektbezogen oder projektuebergreifend suchen,
-* neue Einträge schreiben,
-* Korrekturen nachvollziehbar ergänzen.
+* read old entries,
+* search per-project or cross-project,
+* write new entries,
+* add corrections in a traceable way.
 
-Bramble bleibt bewusst **append-only**. Es gibt kein Update/Delete-Tool.
-Wenn ein Eintrag korrigiert werden muss, wird ein neuer `bugfix`- oder
-`notiz`-Eintrag angelegt, der den alten Eintrag per `id`, Titel oder
-Datum referenziert.
+Bramble is deliberately **append-only**. There is no update/delete tool. To
+correct an entry, write a new `bugfix` or `notiz` entry that references the
+old one by `id`, title or date.
 
-Fuer Brambles eigenes Repo sind die verbindlichen Agentenregeln in
-[`AGENTS.md`](../AGENTS.md) abgelegt. `docs/journal.txt` ist nur noch
-eine historische Importquelle; neue Eintraege werden ausschliesslich
-ueber das MCP-Journal geschrieben.
+For Bramble's own repo, the binding agent rules are in
+[`AGENTS.md`](../AGENTS.md). `docs/journal.txt` is only a historical import
+source; new entries are written exclusively through the MCP journal.
 
-## Verbindung
+The status values (`in_arbeit`, `abgeschlossen`, `notiz`, `bugfix`) are
+German and are part of the data contract — they are stored verbatim and not
+translated (in-progress, done, note, bugfix).
 
-HTTP-MCP-Endpunkt:
+## Connection
+
+HTTP MCP endpoint:
 
 ```text
 https://journal.last-strawberry.com/mcp/
 ```
 
-Jeder HTTP-Request braucht den Header:
+Every HTTP request needs the header:
 
 ```text
 Authorization: Bearer <project-token>
 ```
 
-Für Bramble selbst ist das Projekt:
+For Bramble itself the project is:
 
 ```text
 bramble
 ```
 
-Das Token liegt nur auf dem Host in:
+The token lives only on the host in:
 
 ```text
 /opt/bramble/secrets/tokens.json
 ```
 
-Tokens werden nicht ins Repo geschrieben und nicht in Chatprotokolle
-kopiert.
+Tokens are not written to the repo and not copied into chat transcripts.
 
-## Erwartete Tools
+## Expected tools
 
-Der Client sollte nach erfolgreicher Verbindung diese Tools sehen. Die
-maßgebliche, stets aktuelle Referenz für Arbeitsablauf und Konventionen
-ist `journal_guide()` (Single Source of Truth, am Session-Start aufrufen);
-die folgende Tabelle ist nur eine Übersicht.
+After a successful connection the client should see these tools. The
+authoritative, always-current reference for workflow and conventions is
+`journal_guide()` (single source of truth, call at session start); the table
+below is just an overview.
 
-| Tool | Nutzung |
+| Tool | Use |
 | --- | --- |
-| `journal_guide()` | Kanonische, projektübergreifende Arbeitskonventionen (zuerst aufrufen) |
-| `journal_read(project, n=80)` | Letzte Einträge eines Projekts lesen |
-| `journal_append(project, status, content, phase=None, title=None)` | Neuen Eintrag schreiben |
-| `journal_search(project, query, limit=20)` | Volltextsuche in einem Projekt |
-| `journal_search_all(...)` | Volltextsuche ueber alle Projekte mit optionalen Filtern |
-| `journal_context(project, n_recent=10, include_cross_project=True)` | Kuratierter Session-Startkontext fuer ein Projekt |
-| `journal_digest(...)` | Zeitraum-Digest mit Counts, offenen Punkten, Bugfixes und Entscheidungen |
-| `journal_open_items(project=None, limit=50)` | Offene Arbeitspunkte neueste zuerst, optional pro Projekt gefiltert |
-| `journal_resolve(project, resolves=[ids])` | Offene `in_arbeit`-Einträge per `resolves`-Link schließen; meldet geschlossene/übersprungene ids zurück |
-| `journal_list_projects()` | Projekte mit Counts und letzter Aktivität listen |
+| `journal_guide()` | Canonical, cross-project working conventions (call first) |
+| `journal_read(project, n=80)` | Read the latest entries of a project |
+| `journal_append(project, status, content, phase=None, title=None)` | Write a new entry |
+| `journal_search(project, query, limit=20)` | Full-text search within a project |
+| `journal_search_all(...)` | Full-text search across all projects with optional filters |
+| `journal_context(project, n_recent=10, include_cross_project=True)` | Curated session-start context for a project |
+| `journal_digest(...)` | Time-range digest with counts, open items, bugfixes and decisions |
+| `journal_open_items(project=None, limit=50)` | Open work items, newest first, optionally filtered per project |
+| `journal_resolve(project, resolves=[ids])` | Close open `in_arbeit` entries via `resolves` links; reports closed/skipped ids |
+| `journal_list_projects()` | List projects with counts and last activity |
 
-`journal_append` ist an das Projekt des Tokens gebunden. Ein
-`bramble`-Token darf also nur in `project="bramble"` schreiben. Lesen
-und Suchen bleiben projektübergreifend.
+`journal_append` is bound to the token's project. A `bramble` token may
+therefore only write to `project="bramble"`. Reading and searching stay
+cross-project.
 
-## Arbeitsregeln für KI-Agenten
+## Working rules for AI agents
 
-Zu Beginn einer Bramble-Session:
+At the start of a Bramble session:
 
-0. Einmal `journal_guide()` aufrufen und befolgen. Das liefert die
-  verbindlichen, projektübergreifenden Konventionen (Status, Tags,
-  Korrektur-/`resolves`-Modell, Open-Item-Semantik, DoD). Die folgenden
-  Schritte sind die Bramble-spezifische Anwendung davon.
-1. Bevorzugt `journal_context(project="bramble", n_recent=10)` aufrufen.
-  Fallback: `journal_read(project="bramble", n=20)`.
-2. Bei unklarer Historie gezielt suchen, z. B.
-   `journal_search(project="bramble", query="Phase 4", limit=10)`.
-   Wenn das relevante Projekt unklar ist, `journal_search_all(...)` nutzen.
-3. Falls ein neuer Arbeitsblock startet: frueh einen klaren
-  `in_arbeit`-Eintrag mit Scope und naechstem Schritt anlegen.
-4. Die gelesenen Einträge bei Planung und Statusantworten berücksichtigen.
+0. Call `journal_guide()` once and follow it. It provides the binding,
+  cross-project conventions (statuses, tags, correction/`resolves` model,
+  open-item semantics, DoD). The steps below are the Bramble-specific
+  application of it.
+1. Prefer `journal_context(project="bramble", n_recent=10)`. Fallback:
+  `journal_read(project="bramble", n=20)`.
+2. For an unclear history, search specifically, e.g.
+   `journal_search(project="bramble", query="Phase 4", limit=10)`. If the
+   relevant project is unclear, use `journal_search_all(...)`.
+3. When a new block of work starts: create a clear `in_arbeit` entry early,
+  with scope and next step.
+4. Take the entries you read into account when planning and answering about
+  status.
 
-Während der Arbeit:
+During the work:
 
-* Relevante Entscheidungen, abgeschlossene Arbeitspakete, Bugs und
-  Betriebsereignisse als neuen Eintrag dokumentieren.
-* In Brambles eigenem Repo keine neuen Eintraege in `docs/journal.txt`
-  schreiben.
-* Keine triviale Zwischenmeldung journalisieren; Bramble ist ein
-  Entwicklungsjournal, kein Token-by-Token-Log.
-* Den `phase`-Wert setzen, wenn er natürlich passt, z. B. `Phase 4`.
-* Kurze, konkrete `title`-Werte verwenden.
+* Document relevant decisions, completed work packages, bugs and operational
+  events as new entries.
+* In Bramble's own repo, do not write new entries to `docs/journal.txt`.
+* Do not journal trivial intermediate updates; Bramble is a development
+  journal, not a token-by-token log.
+* Set the `phase` value when it naturally fits, e.g. `Phase 4`.
+* Use short, concrete `title` values.
 
-Am Ende einer substanziellen Arbeit:
+At the end of substantial work:
 
-* Einen Abschluss- oder Fortschrittseintrag schreiben.
-* Tests, Host-Kommandos und offene nächste Schritte im `content`
-  erwähnen.
-* Vor Abschluss diese DoD-Checks einhalten:
-  1. Code/Config committed.
-  2. Relevante Tests oder Smoke-Checks gelaufen.
-  3. Append-only Journal-Eintrag geschrieben.
-  4. Naechster Schritt explizit dokumentiert.
+* Write a completion or progress entry.
+* Mention tests, host commands and open next steps in the `content`.
+* Meet these DoD checks before completion:
+  1. Code/config committed.
+  2. Relevant tests or smoke checks run.
+  3. Append-only journal entry written.
+  4. Next step explicitly documented.
 
-## Status-Werte
+## Status values
 
-| Status | Bedeutung |
+| Status | Meaning |
 | --- | --- |
-| `in_arbeit` | Arbeit begonnen, noch offen |
-| `abgeschlossen` | Arbeitspaket abgeschlossen |
-| `notiz` | Betriebsnotiz, Entscheidung, Kontext |
-| `bugfix` | Fehler behoben oder Korrektur zu einem alten Eintrag |
+| `in_arbeit` | Work started, still open |
+| `abgeschlossen` | Work package completed |
+| `notiz` | Operational note, decision, context |
+| `bugfix` | Bug fixed, or a correction to an older entry |
 
-## Korrekturen und Anpassungen
+## Corrections and adjustments
 
-Bestehende Einträge werden nicht überschrieben. Stattdessen:
+Existing entries are never overwritten. Instead:
 
 ```text
 status: bugfix
-title: Korrektur zu Eintrag <id oder Titel>
+title: Correction to entry <id or title>
 content:
-Korrigiert den Eintrag "<alter Titel>" vom <Datum>.
+Corrects the entry "<old title>" from <date>.
 
-Alt:
-<kurze Beschreibung der falschen Aussage>
+Old:
+<short description of the wrong statement>
 
-Neu:
-<korrigierte Aussage>
+New:
+<corrected statement>
 
-Auswirkung:
-<falls relevant: was daraus folgt>
+Impact:
+<if relevant: what follows from it>
 ```
 
-Für kleinere Ergänzungen ohne Fehler:
+For smaller additions without an error:
 
 ```text
 status: notiz
-title: Nachtrag zu <Thema>
+title: Addendum to <topic>
 content:
-Ergänzt den Eintrag "<alter Titel>" um ...
+Adds to the entry "<old title>" ...
 ```
 
-## Beispiel: Eintrag Schreiben
+## Example: writing an entry
 
 ```json
 {
   "project": "bramble",
   "status": "abgeschlossen",
   "phase": "Phase 4",
-  "title": "AI-Client-Setup dokumentiert",
-  "content": "Bramble wurde fuer MCP-faehige KI-Clients dokumentiert. Agenten lesen zu Beginn journal_read(...), schreiben Fortschritt per journal_append(...) und korrigieren append-only ueber bugfix/notiz-Nachtraege."
+  "title": "AI client setup documented",
+  "content": "Documented Bramble for MCP-capable AI clients. At the start agents read journal_read(...), record progress via journal_append(...), and correct append-only via bugfix/notiz follow-ups."
 }
 ```
 
-## Minimaler System-Prompt-Baustein
+## Minimal system-prompt snippet
 
 ```text
-Nutze Bramble als projektbezogenes Entwicklungsjournal.
+Use Bramble as a project-scoped development journal.
 
-Projekt: <projekt>
+Project: <project>
 
-Rufe zu Beginn jeder Session journal_guide() auf und befolge die dort
-beschriebenen Konventionen (Status, Tags, append-only-Korrekturen,
-Open-Item-/resolves-Semantik, DoD). Lies dann
-journal_context(project="<projekt>", n_recent=10) (Fallback:
-journal_read). Schreibe am Ende substanzieller Arbeit einen
-journal_append-Eintrag.
+At the start of every session, call journal_guide() and follow the
+conventions it describes (statuses, tags, append-only corrections,
+open-item/resolves semantics, DoD). Then read
+journal_context(project="<project>", n_recent=10) (fallback: journal_read).
+At the end of substantial work, write a journal_append entry.
 ```
 
-## Projekt-AGENTS.md-Vorlage
+## Project AGENTS.md template
 
-Andere Beeren-Projekte sollen die geteilten Konventionen **nicht** in ihr
-`AGENTS.md` kopieren, sondern auf `journal_guide()` verweisen. Damit gibt
-es eine Quelle und keinen Copy-Paste-Drift. Minimaler Baustein für das
-`AGENTS.md` eines anderen Projekts:
+Other projects should **not** copy the shared conventions into their
+`AGENTS.md`; they should reference `journal_guide()` instead. That keeps one
+source and avoids copy-paste drift. Minimal block for another project's
+`AGENTS.md`:
 
 ```markdown
-## Projektgedächtnis
+## Project memory
 
-Projekt: <projekt-kebab>
+Project: <project-kebab>
 
-Aktives Projektgedächtnis ist das Bramble-MCP-Journal
-(https://journal.last-strawberry.com/mcp/, projektgebundenes Token).
+The active project memory is the Bramble MCP journal
+(https://journal.last-strawberry.com/mcp/, project-scoped token).
 
-Zu Beginn jeder Session:
-1. `journal_guide()` aufrufen und befolgen — die kanonischen, geteilten
-   Journal-Konventionen (Status, Tags, Korrektur-/`resolves`-Modell,
-   Open-Item-Semantik, Session-Start/Ende, DoD). Nicht hier wiederholen.
-2. `journal_context(project="<projekt-kebab>", n_recent=10)` lesen.
+At the start of every session:
+1. Call `journal_guide()` and follow it — the canonical, shared journal
+   conventions (statuses, tags, correction/`resolves` model, open-item
+   semantics, session start/end, DoD). Do not repeat them here.
+2. Read `journal_context(project="<project-kebab>", n_recent=10)`.
 
-Dieses Dokument ergänzt den Guide nur um Projekt-Spezifika (Tech-Stack,
-Test-Runner, Repo-Layout, Branch-Konventionen).
+This document only adds project specifics (tech stack, test runner, repo
+layout, branch conventions).
 ```
 
-## Verifikation eines neuen Clients
+## Verifying a new client
 
-1. Tool-Liste prüfen: alle zehn Bramble-Tools müssen sichtbar sein.
-1. Konventionen abrufen:
+1. Check the tool list: all ten Bramble tools must be visible.
+1. Fetch the conventions:
 
 ```text
 journal_guide()
 ```
 
-1. Lesen testen:
+1. Test reading:
 
 ```text
 journal_read(project="bramble", n=5)
 ```
 
-1. Suche testen:
+1. Test search:
 
 ```text
 journal_search(project="bramble", query="Backup", limit=5)
 ```
 
-1. Projektuebergreifende Suche testen:
+1. Test cross-project search:
 
 ```text
 journal_search_all(query="Backup", limit=5)
 ```
 
-1. Digest testen:
+1. Test the digest:
 
 ```text
 journal_digest(project="bramble", since="7d")
 ```
 
-1. Session-Kontext testen:
+1. Test session context:
 
 ```text
 journal_context(project="bramble", n_recent=10)
 ```
 
-1. Open-Items testen:
+1. Test open items:
 
 ```text
 journal_open_items(project="bramble", limit=10)
 ```
 
-1. Schreibtest nur als echten Journal-Eintrag ausführen, nicht als
-  beliebigen Smoke-Eintrag. Beispiel: `title="Client <name> angebunden"`.
+1. Run the write test only as a real journal entry, not as an arbitrary
+  smoke entry. Example: `title="Client <name> connected"`.
 
-Wenn ein Schreibtest fehlschlägt, zuerst prüfen:
+If a write test fails, check first:
 
-* Ist der Authorization-Header gesetzt?
-* Gehört das Token zum Projekt `bramble`?
-* Schreibt der Client wirklich nach `project="bramble"`?
-* Ist der Client eventuell durch Fail2Ban gesperrt?
+* Is the Authorization header set?
+* Does the token belong to project `bramble`?
+* Is the client really writing to `project="bramble"`?
+* Is the client possibly blocked by Fail2Ban?

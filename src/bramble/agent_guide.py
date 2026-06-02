@@ -18,106 +18,108 @@ from __future__ import annotations
 AGENT_GUIDE_VERSION = "2026-06-02"
 
 AGENT_GUIDE = """\
-# Bramble Journal – Geteilter Agenten-Arbeitsablauf
+# Bramble Journal — Shared Agent Workflow
 
-Dies ist die kanonische, projektuebergreifende Arbeitsanweisung fuer das
-Bramble-MCP-Journal. Sie gilt fuer ALLE Beeren-Projekte. Projekt-AGENTS.md
-verweist hierauf und ergaenzt nur Projekt-Spezifisches (Projektname, Stack,
-Test-Runner, Repo-Layout) – diese Konventionen werden dort NICHT wiederholt.
+This is the canonical, project-agnostic working guide for the Bramble MCP
+journal. It applies to ALL projects. A project's AGENTS.md references this
+guide and only adds project specifics (project name, stack, test runner,
+repo layout) — these conventions are NOT repeated there.
 
-## Grundprinzip
+## Core principle
 
-Das Journal ist append-only. Eintraege werden nie geaendert oder geloescht.
-Korrekturen und Abschluesse sind immer NEUE Eintraege, die den alten per
-Link oder Verweis referenzieren.
+The journal is append-only. Entries are never edited or deleted. Corrections
+and completions are always NEW entries that reference the old one by link or
+reference.
 
-## Session-Start
+## Session start
 
-1. Immer zuerst: `journal_context(project="<projekt>", n_recent=10)`.
-   Leerer Kontext ist kein Fehler – dann bei echter Arbeit einen ersten
-   Eintrag schreiben, keinen Smoke-Eintrag.
-2. Bei unklarem oder projektuebergreifendem Thema:
-   `journal_search_all(query="<thema>", limit=20)`.
-3. Faengt ein neuer Arbeitsblock an: einen sauberen `in_arbeit`-Eintrag mit
-   klarem Scope und naechstem Schritt schreiben.
+1. Always first: `journal_context(project="<project>", n_recent=10)`.
+   An empty context is not an error — then, on real work, write a first
+   entry, not a smoke entry.
+2. For an unclear or cross-project topic:
+   `journal_search_all(query="<topic>", limit=20)`.
+3. When a new block of work starts: write a clean `in_arbeit` entry with a
+   clear scope and next step.
 
-## Eintragsarten (Status)
+## Entry kinds (status)
 
-* `in_arbeit`: gestartete Arbeit mit offenem naechstem Schritt.
-* `abgeschlossen`: fertig verifizierter Arbeitsblock.
-* `notiz`: Entscheidung, Betriebsereignis, Kontext (keine Fehlerkorrektur).
-* `bugfix`: Korrektur eines Fehlers, inkl. Korrektur zu altem Eintrag.
+The status values are German and stored verbatim (do not translate them):
 
-Keine neuen Statuswerte erfinden (`todo`/`blocked`/`review`): solche
-Information gehoert in Tags oder Inhalt.
+* `in_arbeit` (in progress): started work with an open next step.
+* `abgeschlossen` (done): a finished, verified block of work.
+* `notiz` (note): decision, operational event, context (not a bug fix).
+* `bugfix`: correction of an error, including a correction to an old entry.
+
+Do not invent new status values (`todo`/`blocked`/`review`): such
+information belongs in tags or content.
 
 ## Tags
 
-Kontrolliertes Vokabular, lowercase-kebab, max. 5 pro Eintrag: `decision`,
+Controlled vocabulary, lowercase-kebab, max. 5 per entry: `decision`,
 `deployment`, `security`, `backup`, `import`, `admin-ui`, `test`, `docs`,
-`bug`, `token`, `agent`. Tags ergaenzen Status und Phase, ersetzen sie nicht.
+`bug`, `token`, `agent`. Tags complement status and phase; they do not
+replace them.
 
-## Korrekturen (append-only)
+## Corrections (append-only)
 
-Alten Eintrag nie aendern. Stattdessen neuen `bugfix`-Eintrag schreiben und
-per Link `corrects -> <alte id>` (oder per id/Datum im Text) referenzieren.
+Never edit an old entry. Instead write a new `bugfix` entry and reference it
+via a link `corrects -> <old id>` (or by id/date in the text).
 
-## Offene Punkte und Abschluss
+## Open items and completion
 
-"Offen" wird inferiert, nicht nur am Status abgelesen. `journal_open_items`
-und der `open_items`-Slice von `journal_context` klassifizieren jeden
-`in_arbeit`-Eintrag als:
+"Open" is inferred, not just read off the status. `journal_open_items` and
+the `open_items` slice of `journal_context` classify each `in_arbeit` entry
+as:
 
-* `resolved` – ein spaeterer Eintrag markiert ihn als erledigt; wird
-  standardmaessig ausgeblendet (mit `include_resolved=true` sichtbar samt
-  `resolution_reason`/`resolved_by_id`).
-* `stale` – unaufgeloest und aelter als `stale_after_days` (Default 30);
-  wird angezeigt, aber markiert.
-* `open` – unaufgeloest und innerhalb des Fensters.
+* `resolved` – a later entry marks it done; hidden by default (visible with
+  `include_resolved=true`, with `resolution_reason`/`resolved_by_id`).
+* `stale` – unresolved and older than `stale_after_days` (default 30);
+  shown, but flagged.
+* `open` – unresolved and within the window.
 
-So schliesst du einen offenen Punkt sauber:
+How to close an open item cleanly:
 
-1. Am einfachsten: `journal_resolve(project, resolves=[<ids>])`. Schreibt
-   EINEN append-only-Eintrag mit `resolves`-Links auf alle ids und meldet
-   zurueck, welche geschlossen und welche uebersprungen wurden (missing /
-   anderes Projekt / nicht in_arbeit) – so ist der Abschluss verifiziert.
-2. Manuell gleichwertig: ein Abschluss-Eintrag (`abgeschlossen`/`notiz`/
-   `bugfix`) mit Link `resolves -> <id des in_arbeit-Eintrags>`.
-3. Alternativ explizit: die exakte Schreibweise `#<offen> -> #<neu>` im Text
-   des Abschluss-Eintrags.
-4. Schwaechere Heuristik (automatisch): ein spaeterer
-   `abgeschlossen`/`bugfix`-Eintrag mit gleicher Phase oder gleichem Titel.
+1. Easiest: `journal_resolve(project, resolves=[<ids>])`. Writes ONE
+   append-only entry with `resolves` links to all ids and reports which were
+   closed and which were skipped (missing / other project / not in_arbeit) —
+   so the closure is verified.
+2. Equivalent manually: a closing entry (`abgeschlossen`/`notiz`/`bugfix`)
+   with a link `resolves -> <id of the in_arbeit entry>`.
+3. Or explicitly: the exact form `#<open> -> #<new>` in the text of the
+   closing entry.
+4. Weaker heuristic (automatic): a later `abgeschlossen`/`bugfix` entry with
+   the same phase or the same title.
 
-ACHTUNG – haeufige Falle: Eine ID nur in Prosa zu nennen ("#655 ist
-erledigt", "schliesst 27.2-27.5") schliesst den Punkt NICHT. Die Inferenz
-parst keine Fliesstext-IDs – nutze zwingend `journal_resolve`, einen
-`resolves`-Link oder die exakte `#<id> -> #<neu>`-Schreibweise. Pruefe nach
-dem Schliessen mit `journal_open_items`, dass der Punkt verschwunden ist.
+CAUTION — common trap: naming an id only in prose ("#655 is done", "closes
+27.2-27.5") does NOT close the item. The inference does not parse free-text
+ids — you MUST use `journal_resolve`, a `resolves` link, or the exact
+`#<id> -> #<new>` form. After closing, check with `journal_open_items` that
+the item is gone.
 
-Wichtig: Echten Backlog (Folgearbeit, die noch nicht begonnen wurde) als
-schlanken `in_arbeit`-Eintrag mit naechstem Schritt fuehren. Was nirgends
-als `in_arbeit` steht, kann kein Tool als offen melden.
+Important: keep real backlog (follow-up work not yet started) as a lean
+`in_arbeit` entry with a next step. What is nowhere recorded as `in_arbeit`
+cannot be reported as open by any tool.
 
-## Waehrend der Arbeit
+## During the work
 
-* Wichtige Entscheidungen als `notiz` mit Tag `decision`.
-* Fehlerkorrekturen als `bugfix`, nie den alten Eintrag aendern.
-* Deployment/Backup/Token-Ereignisse als `notiz`/`abgeschlossen` mit
-  passenden Tags.
+* Important decisions as a `notiz` with tag `decision`.
+* Bug fixes as `bugfix`, never editing the old entry.
+* Deployment/backup/token events as `notiz`/`abgeschlossen` with fitting
+  tags.
 
-## Session-Ende (Definition of Done)
+## Session end (Definition of Done)
 
-Ein Arbeitspaket gilt erst als sauber abgeschlossen, wenn:
+A work package is only cleanly done when:
 
-1. Code/Config committed ist.
-2. Relevante Tests/Smoke ausgefuehrt und im Eintrag genannt sind.
-3. Ein append-only Journal-Eintrag geschrieben ist.
-4. Die offene Folgearbeit explizit als naechster Schritt dokumentiert ist.
+1. Code/config is committed.
+2. Relevant tests/smoke are run and named in the entry.
+3. An append-only journal entry is written.
+4. The open follow-up is explicitly documented as the next step.
 
-## Nicht tun
+## Do not
 
-* Keine `update`/`delete` am Journal; keine Mutation alter Eintraege.
-* Keine Tokens/Secrets ins Journal, in Logs oder ins Repo.
-* `docs/journal.txt` ist nur historische Importquelle – dort keine neuen
-  Eintraege.
+* No `update`/`delete` on the journal; no mutation of old entries.
+* No tokens/secrets in the journal, in logs or in the repo.
+* `docs/journal.txt` is only a historical import source — no new entries
+  there.
 """

@@ -1,61 +1,60 @@
-# Sicherheitsrichtlinie
+# Security Policy
 
-## Sicherheitsmodell — bitte zuerst lesen
+## Security model — read this first
 
-Bramble ist als **Single-Owner-Werkzeug** entworfen: ein Betreiber führt das
-Journal für seine eigenen Projekte. Dieses Modell hat eine bewusste, aber
-für Außenstehende überraschende Eigenschaft:
+Bramble is designed as a **single-owner tool**: one operator runs the
+journal for their own projects. This model has a deliberate but, for
+outsiders, surprising property:
 
-> **Lesen und Suchen sind projektübergreifend. Jedes gültige Token kann die
-> Einträge ALLER Projekte lesen.** Nur das *Schreiben* (`journal_append`) ist
-> an das Projekt des Tokens gebunden.
+> **Reading and searching are cross-project. Any valid token can read the
+> entries of ALL projects.** Only *writing* (`journal_append`) is bound to
+> the token's project.
 
-Das heißt konkret:
+Concretely:
 
-- Ein Token bedeutet effektiv **Lesezugriff auf das gesamte Journal**.
-- Bramble bietet **keine Mandantentrennung** und ist **nicht** dafür geeignet,
-  fremde, gegenseitig misstrauende Nutzer auf derselben Instanz zu bedienen.
-- Gib Tokens nur an Parteien aus, denen du den Lesezugriff auf *alle*
-  Projekte dieser Instanz anvertraust (z. B. deine eigenen Agenten/Projekte).
-- Wer Mandantentrennung braucht, betreibt **getrennte Instanzen** mit
-  getrennten Datenbanken.
+- A token effectively grants **read access to the entire journal**.
+- Bramble provides **no tenant isolation** and is **not** suitable for
+  serving mutually distrusting users on the same instance.
+- Only issue tokens to parties you trust with read access to *all* projects
+  on that instance (e.g. your own agents/projects).
+- If you need tenant isolation, run **separate instances** with separate
+  databases.
 
-Wenn du Bramble als gehosteten Mehr-Nutzer-Dienst betreiben willst, ist das
-ohne tiefgreifende Änderungen (echte Mandanten-Lese-Isolation) **nicht**
-sicher.
+If you want to run Bramble as a hosted multi-user service, that is **not**
+safe without deep changes (real per-tenant read isolation).
 
-## Append-only und personenbezogene Daten
+## Append-only and personal data
 
-Das Datenmodell ist **append-only**: Es gibt bewusst keine Update-/Delete-
-Tools; Korrekturen sind neue Einträge. Das ist für ein Entwicklungsjournal
-ein Vorteil, steht aber im Konflikt mit Löschpflichten (z. B. DSGVO
-Recht-auf-Löschung). Speichere daher keine personenbezogenen oder sonst
-löschpflichtigen Daten, die du später entfernen können musst. Für einen
-öffentlichen Dienst müsstest du eine eigene Lösch-/Purge-Strategie ergänzen.
+The data model is **append-only**: there are deliberately no update/delete
+tools; corrections are new entries. That is an advantage for a development
+journal, but it conflicts with deletion obligations (e.g. the GDPR right to
+erasure). So do not store personal data — or anything else you may later be
+required to delete — that you must be able to remove. For a public service
+you would need to add your own deletion/purge strategy.
 
-## Betriebsempfehlungen
+## Operational recommendations
 
-- HTTP-Transport ist authentifiziert (Bearer-Token) — **immer** hinter TLS
-  und einem Reverse-Proxy betreiben, nie ungeschützt exponieren.
-- Rate-Limit (pro Token/IP) und Fail2Ban aktiv lassen; siehe `deploy/`.
-- Die Admin-UI nur lokal binden (Default `127.0.0.1`) und ausschließlich
-  über einen SSH-Tunnel erreichen — **nicht** über einen öffentlichen Pfad.
-- Tokens und das Argon2id-Admin-Secret liegen außerhalb des Repos
-  (`secrets/`, per `.gitignore` ausgeschlossen). Niemals committen oder in
-  Logs/Chatprotokolle schreiben.
-- Nach Token-Rotation den MCP-Dienst neu starten (die Token-Datei wird beim
-  Start gelesen).
-- Schreibende Admin-Aktionen sind CSRF-geschützt und werden append-only in
-  `admin_audit_events` protokolliert.
+- The HTTP transport is authenticated (bearer token) — **always** run it
+  behind TLS and a reverse proxy, never expose it unprotected.
+- Keep the rate limit (per token/IP) and Fail2Ban enabled; see `deploy/`.
+- Bind the admin UI to localhost only (default `127.0.0.1`) and reach it
+  exclusively through an SSH tunnel — **not** via a public path.
+- Tokens and the Argon2id admin secret live outside the repo (`secrets/`,
+  excluded via `.gitignore`). Never commit them or write them to
+  logs/chat transcripts.
+- After rotating a token, restart the MCP service (the token file is read at
+  startup).
+- Writing admin actions are CSRF-protected and logged append-only to
+  `admin_audit_events`.
 
-## Unterstützte Versionen
+## Supported versions
 
-Aktuell wird nur der jeweils neueste Stand auf `main` mit Fixes versorgt.
+Only the latest state on `main` currently receives fixes.
 
-## Sicherheitslücke melden
+## Reporting a vulnerability
 
-Bitte **keine** öffentlichen Issues für Sicherheitslücken anlegen. Nutze
-stattdessen die private Meldefunktion von GitHub („Report a vulnerability"
-im Tab *Security* des Repositories). Beschreibe Reproduktion, betroffene
-Version/Commit und mögliche Auswirkung. Wir bestätigen den Eingang und
-koordinieren einen Fix vor der Veröffentlichung.
+Please do **not** open public issues for security vulnerabilities. Use
+GitHub's private reporting instead ("Report a vulnerability" in the
+repository's *Security* tab). Describe the reproduction, the affected
+version/commit and the potential impact. We acknowledge receipt and
+coordinate a fix before disclosure.
