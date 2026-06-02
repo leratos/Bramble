@@ -1161,7 +1161,13 @@ class TestJournalGuide:
         guide = result.data["guide"]
         assert isinstance(guide, str) and guide.strip()
         # Anchors on the conventions this guide is meant to carry.
-        for needle in ("append-only", "resolves", "journal_context", "in_arbeit"):
+        for needle in (
+            "append-only",
+            "resolves",
+            "journal_resolve",
+            "journal_context",
+            "in_arbeit",
+        ):
             assert needle in guide
 
     async def test_guide_needs_no_auth_scope(

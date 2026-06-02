@@ -15,7 +15,7 @@ the new version on its next ``journal_guide()`` call.
 from __future__ import annotations
 
 # ISO date of the last meaningful change to AGENT_GUIDE. Bump on every edit.
-AGENT_GUIDE_VERSION = "2026-05-30"
+AGENT_GUIDE_VERSION = "2026-06-02"
 
 AGENT_GUIDE = """\
 # Bramble Journal – Geteilter Agenten-Arbeitsablauf
@@ -75,14 +75,24 @@ und der `open_items`-Slice von `journal_context` klassifizieren jeden
   wird angezeigt, aber markiert.
 * `open` – unaufgeloest und innerhalb des Fensters.
 
-So schliesst du einen offenen Punkt sauber (in dieser Reihenfolge der
-Zuverlaessigkeit):
+So schliesst du einen offenen Punkt sauber:
 
-1. Bevorzugt: Abschluss-Eintrag mit Link `resolves -> <id des
-   in_arbeit-Eintrags>`. (Verfuegbar, sobald Bramble Phase 4f deployed ist.)
-2. Alternativ explizit: `#<offen> -> #<neu>` im Text des Abschluss-Eintrags.
-3. Schwaechere Heuristik (automatisch): ein spaeterer
+1. Am einfachsten: `journal_resolve(project, resolves=[<ids>])`. Schreibt
+   EINEN append-only-Eintrag mit `resolves`-Links auf alle ids und meldet
+   zurueck, welche geschlossen und welche uebersprungen wurden (missing /
+   anderes Projekt / nicht in_arbeit) – so ist der Abschluss verifiziert.
+2. Manuell gleichwertig: ein Abschluss-Eintrag (`abgeschlossen`/`notiz`/
+   `bugfix`) mit Link `resolves -> <id des in_arbeit-Eintrags>`.
+3. Alternativ explizit: die exakte Schreibweise `#<offen> -> #<neu>` im Text
+   des Abschluss-Eintrags.
+4. Schwaechere Heuristik (automatisch): ein spaeterer
    `abgeschlossen`/`bugfix`-Eintrag mit gleicher Phase oder gleichem Titel.
+
+ACHTUNG – haeufige Falle: Eine ID nur in Prosa zu nennen ("#655 ist
+erledigt", "schliesst 27.2-27.5") schliesst den Punkt NICHT. Die Inferenz
+parst keine Fliesstext-IDs – nutze zwingend `journal_resolve`, einen
+`resolves`-Link oder die exakte `#<id> -> #<neu>`-Schreibweise. Pruefe nach
+dem Schliessen mit `journal_open_items`, dass der Punkt verschwunden ist.
 
 Wichtig: Echten Backlog (Folgearbeit, die noch nicht begonnen wurde) als
 schlanken `in_arbeit`-Eintrag mit naechstem Schritt fuehren. Was nirgends

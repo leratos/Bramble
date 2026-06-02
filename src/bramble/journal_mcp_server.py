@@ -408,7 +408,8 @@ class JournalMCPServer:
                 "journal_search_all for full-text search, journal_context "
                 "for curated session-start context, journal_digest for "
                 "period summaries, journal_open_items for open-task "
-                "snapshots, and journal_list_projects for an overview."
+                "snapshots, journal_resolve to close open items via "
+                "resolves links, and journal_list_projects for an overview."
             ),
         )
         self._register_tools()

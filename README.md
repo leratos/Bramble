@@ -76,7 +76,7 @@ synchronisiert über drei Trigger (insert/update/delete).
 
 ### MCP-Tools
 
-Neun Tools auf dem `JournalMCPServer`, jedes mit `ToolError`-konformer
+Zehn Tools auf dem `JournalMCPServer`, jedes mit `ToolError`-konformer
 Fehlerübersetzung:
 
 | Tool | Zweck |
@@ -89,6 +89,7 @@ Fehlerübersetzung:
 | `journal_context(project, n_recent=10, include_cross_project=True, full=False)` | Kuratierter Session-Startkontext (offene Punkte, Bugfixes, Entscheidungen, Related-Projects); `content` standardmäßig als Vorschau gekürzt (+ `content_chars`/`content_truncated`), `full=True` für Volltext |
 | `journal_digest(...)` | Strukturierter Zeitraum-Digest mit Counts und kuratierten Entry-Listen |
 | `journal_open_items(project=None, limit=50, include_resolved=False, stale_after_days=30)` | Offene Arbeitspunkte mit append-only-Closure-Inferenz; je Item `open_state` (`open`/`stale`/`resolved`), `resolution_reason`, `resolved_by_id`, `age_days`. Resolved standardmäßig ausgeblendet |
+| `journal_resolve(project, resolves=[ids], title=None, content=None)` | Schließt offene `in_arbeit`-Einträge: schreibt einen append-only-Eintrag mit `resolves`-Links auf die ids und meldet `resolved`/`skipped` (missing/anderes Projekt/nicht in_arbeit) zurück |
 | `journal_list_projects()` | `(project, entry_count, last_timestamp)` pro Projekt, neueste Aktivität zuerst |
 
 ### Offene Punkte im append-only-Modell
