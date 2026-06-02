@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -1542,6 +1543,39 @@ class TestJournalResolve:
         assert second.data["resolved"] == []
         assert second.data["entry"] is None
         assert second.data["skipped"]["already_resolved"] == [open_entry.id]
+
+    async def test_concurrent_resolves_of_same_id_write_one_entry(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        open_entry = db.append(
+            JournalEntry(
+                project="bramble", status=JournalStatus.IN_ARBEIT, content="open"
+            )
+        )
+
+        async with Client(server.app) as client:
+            first, second = await asyncio.gather(
+                client.call_tool(
+                    "journal_resolve",
+                    {"project": "bramble", "resolves": [open_entry.id]},
+                ),
+                client.call_tool(
+                    "journal_resolve",
+                    {"project": "bramble", "resolves": [open_entry.id]},
+                ),
+            )
+
+        # Exactly one call resolves the id and writes a closing entry; the
+        # other is serialised by the per-process lock and sees it as already
+        # resolved. No duplicate closing note.
+        resolved_sizes = sorted(
+            [len(first.data["resolved"]), len(second.data["resolved"])]
+        )
+        assert resolved_sizes == [0, 1]
+        written = [
+            c.data for c in (first, second) if c.data["entry"] is not None
+        ]
+        assert len(written) == 1
 
     async def test_no_resolvable_targets_writes_no_entry(
         self, server: JournalMCPServer, db: JournalDB
