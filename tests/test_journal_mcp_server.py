@@ -167,6 +167,7 @@ class TestToolRegistry:
             "journal_list_projects",
             "journal_open_items",
             "journal_read",
+            "journal_resolve",
             "journal_search",
             "journal_search_all",
         ]
@@ -1433,6 +1434,128 @@ class TestProjectScope:
         finally:
             _token_project.reset(reset)
         assert result.data["project"] == "bramble"
+
+
+# ---------------------------------------------------------------------------
+# journal_resolve
+# ---------------------------------------------------------------------------
+class TestJournalResolve:
+    async def test_resolves_open_item_and_reports(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        open_entry = db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content="stale work",
+                title="X",
+            )
+        )
+
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_resolve",
+                {"project": "bramble", "resolves": [open_entry.id]},
+            )
+            after = await client.call_tool(
+                "journal_open_items", {"project": "bramble"}
+            )
+
+        assert result.data["resolved"] == [open_entry.id]
+        assert result.data["skipped"] == {
+            "missing": [],
+            "other_project": [],
+            "not_in_arbeit": [],
+        }
+        assert result.data["entry"]["status"] == "notiz"
+        assert result.data["entry"]["links"] == [
+            {"to_entry_id": open_entry.id, "relation": "resolves"}
+        ]
+        # The resolved entry no longer shows up as open.
+        assert open_entry.id not in [row["id"] for row in after.data]
+
+    async def test_reports_skipped_categories(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        open_entry = db.append(
+            JournalEntry(
+                project="bramble", status=JournalStatus.IN_ARBEIT, content="open"
+            )
+        )
+        other_project = db.append(
+            JournalEntry(
+                project="elder-berry", status=JournalStatus.IN_ARBEIT, content="foreign"
+            )
+        )
+        done = db.append(
+            JournalEntry(
+                project="bramble", status=JournalStatus.ABGESCHLOSSEN, content="done"
+            )
+        )
+
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_resolve",
+                {
+                    "project": "bramble",
+                    "resolves": [open_entry.id, other_project.id, done.id, 999999],
+                },
+            )
+
+        assert result.data["resolved"] == [open_entry.id]
+        assert result.data["skipped"] == {
+            "missing": [999999],
+            "other_project": [other_project.id],
+            "not_in_arbeit": [done.id],
+        }
+
+    async def test_no_resolvable_targets_writes_no_entry(
+        self, server: JournalMCPServer, db: JournalDB
+    ) -> None:
+        done = db.append(
+            JournalEntry(
+                project="bramble", status=JournalStatus.ABGESCHLOSSEN, content="done"
+            )
+        )
+
+        async with Client(server.app) as client:
+            result = await client.call_tool(
+                "journal_resolve",
+                {"project": "bramble", "resolves": [done.id, 888888]},
+            )
+
+        assert result.data["resolved"] == []
+        assert result.data["entry"] is None
+        assert result.data["skipped"]["not_in_arbeit"] == [done.id]
+        assert result.data["skipped"]["missing"] == [888888]
+
+    async def test_rejects_empty_resolves(self, server: JournalMCPServer) -> None:
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="must not be empty"):
+                await client.call_tool(
+                    "journal_resolve", {"project": "bramble", "resolves": []}
+                )
+
+    async def test_rejects_non_positive_id(self, server: JournalMCPServer) -> None:
+        async with Client(server.app) as client:
+            with pytest.raises(ToolError, match="positive"):
+                await client.call_tool(
+                    "journal_resolve", {"project": "bramble", "resolves": [0]}
+                )
+
+    async def test_rejected_for_foreign_project(
+        self, server: JournalMCPServer
+    ) -> None:
+        reset = _token_project.set("elder-berry")
+        try:
+            async with Client(server.app) as client:
+                with pytest.raises(ToolError, match="scoped to project"):
+                    await client.call_tool(
+                        "journal_resolve",
+                        {"project": "bramble", "resolves": [1]},
+                    )
+        finally:
+            _token_project.reset(reset)
 
 
 # ---------------------------------------------------------------------------

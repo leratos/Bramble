@@ -229,6 +229,14 @@ def _mcp_source(source: str | None) -> str:
     return source
 
 
+def _default_resolve_content(ids: list[int]) -> str:
+    refs = ", ".join(f"#{entry_id}" for entry_id in ids)
+    return (
+        "Statusabschluss (append-only): schliesst die folgenden offenen "
+        f"Punkte per resolves-Link: {refs}."
+    )
+
+
 def _enforce_project_scope(project: str) -> None:
     """Reject a write whose project does not match the bearer token.
 
@@ -506,6 +514,72 @@ class JournalMCPServer:
             )
             persisted = await asyncio.to_thread(db.append, entry)
             return _entry_to_dict(persisted)
+
+        @app.tool
+        @translate_errors
+        async def journal_resolve(
+            project: str,
+            resolves: list[int],
+            title: str | None = None,
+            content: str | None = None,
+        ) -> dict[str, Any]:
+            """Close open work items by writing one append-only resolving entry.
+
+            The reliable way to mark a stale ``in_arbeit`` entry done is a
+            ``resolves`` link from a later entry — merely mentioning ids in
+            prose (e.g. "#655 is done") does NOT close them. This tool writes a
+            single ``notiz`` that links ``resolves -> <id>`` for every id in
+            ``resolves`` and reports exactly which ids it closed and which it
+            skipped, so the closure is verifiable.
+
+            ``resolves`` must list ids of ``in_arbeit`` entries in ``project``.
+            Ids that are missing, belong to another project, or are not
+            ``in_arbeit`` are skipped (no link created) and listed under
+            ``skipped``. If nothing is resolvable, no entry is written. On the
+            authenticated ``http`` transport the bearer token is bound to one
+            project (Phase-3 Decision B).
+            """
+
+            _require_kebab_case(project)
+            _enforce_project_scope(project)
+            classification = await asyncio.to_thread(
+                db.classify_resolve_targets, project, resolves
+            )
+            resolvable = [t for t, state in classification.items() if state == "open"]
+            skipped = {
+                "missing": [t for t, s in classification.items() if s == "missing"],
+                "other_project": [
+                    t for t, s in classification.items() if s == "other_project"
+                ],
+                "not_in_arbeit": [
+                    t for t, s in classification.items() if s == "not_in_arbeit"
+                ],
+            }
+
+            entry_dict: dict[str, Any] | None = None
+            if resolvable:
+                if content and content.strip():
+                    body = content
+                else:
+                    body = _default_resolve_content(resolvable)
+                entry = JournalEntry(
+                    project=project,
+                    status=JournalStatus.NOTIZ,
+                    content=body,
+                    title=title,
+                    source=_mcp_source(None),
+                    links=[
+                        {"to_entry_id": t, "relation": "resolves"} for t in resolvable
+                    ],
+                )
+                persisted = await asyncio.to_thread(db.append, entry)
+                entry_dict = _entry_to_dict(persisted)
+
+            return {
+                "entry": entry_dict,
+                "resolved": resolvable,
+                "skipped": skipped,
+            }
 
         @app.tool
         @translate_errors

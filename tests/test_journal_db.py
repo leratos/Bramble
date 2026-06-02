@@ -1330,6 +1330,67 @@ class TestOpenItemsView:
 
 
 # ---------------------------------------------------------------------------
+# classify_resolve_targets()
+# ---------------------------------------------------------------------------
+class TestClassifyResolveTargets:
+    def test_classifies_each_state(self, db: JournalDB) -> None:
+        open_entry = db.append(
+            JournalEntry(
+                project="bramble", status=JournalStatus.IN_ARBEIT, content="open"
+            )
+        )
+        done = db.append(
+            JournalEntry(
+                project="bramble", status=JournalStatus.ABGESCHLOSSEN, content="done"
+            )
+        )
+        foreign = db.append(
+            JournalEntry(
+                project="elder-berry", status=JournalStatus.IN_ARBEIT, content="foreign"
+            )
+        )
+
+        result = db.classify_resolve_targets(
+            "bramble", [open_entry.id, done.id, foreign.id, 12345]
+        )
+
+        assert result == {
+            open_entry.id: "open",
+            done.id: "not_in_arbeit",
+            foreign.id: "other_project",
+            12345: "missing",
+        }
+
+    def test_dedupes_and_preserves_order(self, db: JournalDB) -> None:
+        a = db.append(
+            JournalEntry(project="bramble", status=JournalStatus.IN_ARBEIT, content="a")
+        )
+        b = db.append(
+            JournalEntry(project="bramble", status=JournalStatus.IN_ARBEIT, content="b")
+        )
+
+        result = db.classify_resolve_targets("bramble", [b.id, a.id, b.id])
+
+        assert list(result.keys()) == [b.id, a.id]
+
+    def test_rejects_empty(self, db: JournalDB) -> None:
+        with pytest.raises(ValueError, match="must not be empty"):
+            db.classify_resolve_targets("bramble", [])
+
+    def test_rejects_non_positive(self, db: JournalDB) -> None:
+        with pytest.raises(ValueError, match="positive"):
+            db.classify_resolve_targets("bramble", [0])
+
+    def test_rejects_non_int(self, db: JournalDB) -> None:
+        with pytest.raises(TypeError):
+            db.classify_resolve_targets("bramble", ["12"])  # type: ignore[list-item]
+
+    def test_rejects_string_ids(self, db: JournalDB) -> None:
+        with pytest.raises(TypeError):
+            db.classify_resolve_targets("bramble", "12")
+
+
+# ---------------------------------------------------------------------------
 # context()
 # ---------------------------------------------------------------------------
 class TestContext:

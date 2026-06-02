@@ -54,6 +54,7 @@ _SEARCH_ALL_LIMIT_MAX = 100
 _DIGEST_LIMIT_MAX = 100
 _OPEN_ITEMS_LIMIT_MAX = 100
 _OPEN_ITEMS_DEFAULT_STALE_AFTER_DAYS = 30
+_RESOLVE_IDS_MAX = 100
 _CONTEXT_N_RECENT_MAX = 100
 _CONTEXT_RELATED_PROJECTS_MAX = 5
 _CONTEXT_RELATED_SEARCH_LIMIT = 20
@@ -657,6 +658,48 @@ class JournalDB:
         views = self._open_item_views(project=project)
         return sum(1 for view in views if not view.is_resolved)
 
+    def classify_resolve_targets(self, project: str, ids: object) -> dict[int, str]:
+        """Classify ``ids`` for an explicit resolve (used by ``journal_resolve``).
+
+        For each requested id (deduplicated, original order preserved) return
+        one of:
+
+        * ``"open"`` – exists, belongs to ``project`` and is ``in_arbeit`` →
+          can be closed with a ``resolves`` link.
+        * ``"missing"`` – no entry with that id.
+        * ``"other_project"`` – exists but belongs to a different project.
+        * ``"not_in_arbeit"`` – exists in ``project`` but is not ``in_arbeit``
+          (resolving it would be meaningless: only ``in_arbeit`` entries are
+          ever reported as open).
+        """
+
+        self._validate_project_arg(project)
+        project = project.strip()
+        target_ids = self._normalise_resolve_ids(ids)
+
+        placeholders = ",".join("?" for _ in target_ids)
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, project, status FROM journal_entries "
+                f"WHERE id IN ({placeholders})",
+                list(target_ids),
+            ).fetchall()
+        found = {int(row["id"]): (row["project"], row["status"]) for row in rows}
+
+        result: dict[int, str] = {}
+        for target_id in target_ids:
+            if target_id not in found:
+                result[target_id] = "missing"
+                continue
+            row_project, row_status = found[target_id]
+            if row_project != project:
+                result[target_id] = "other_project"
+            elif row_status != JournalStatus.IN_ARBEIT.value:
+                result[target_id] = "not_in_arbeit"
+            else:
+                result[target_id] = "open"
+        return result
+
     def open_items_view(
         self,
         *,
@@ -929,6 +972,32 @@ class JournalDB:
             raise TypeError("stale_after_days must be an int")
         if value <= 0:
             raise ValueError("stale_after_days must be positive")
+
+    @staticmethod
+    def _normalise_resolve_ids(ids: object) -> tuple[int, ...]:
+        if isinstance(ids, (str, bytes)):
+            raise TypeError("resolves must be a list of entry ids, not a string")
+        try:
+            iterator = iter(ids)  # type: ignore[arg-type]
+        except TypeError as exc:
+            raise TypeError("resolves must be a list of entry ids") from exc
+
+        ordered: list[int] = []
+        seen: set[int] = set()
+        for value in iterator:
+            # bool is a subclass of int – exclude it explicitly.
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError("resolves must contain only positive ints")
+            if value <= 0:
+                raise ValueError("resolves ids must be positive")
+            if value not in seen:
+                seen.add(value)
+                ordered.append(value)
+        if not ordered:
+            raise ValueError("resolves must not be empty")
+        if len(ordered) > _RESOLVE_IDS_MAX:
+            raise ValueError(f"resolves may target at most {_RESOLVE_IDS_MAX} ids")
+        return tuple(ordered)
 
 
 def _migrate_projects_from_entries(conn: sqlite3.Connection) -> None:
