@@ -136,6 +136,52 @@ class TestAdminApp:
         assert "bramble" in response.text
         assert "elder-berry" in response.text
         assert "read-only dashboard entry" in response.text
+        # English is the default language.
+        assert '<html lang="en">' in response.text
+        assert "Open items" in response.text
+
+    def test_dashboard_renders_in_german_when_configured(
+        self, db: JournalDB, tmp_path: Path
+    ) -> None:
+        db.append(
+            JournalEntry(
+                project="bramble",
+                status=JournalStatus.IN_ARBEIT,
+                content="open task",
+            )
+        )
+        tokens_file = tmp_path / "secrets" / "tokens.json"
+        write_token_map(tokens_file, {"bramble": "tok-bramble"})
+        config = AdminConfig(
+            db_path=db.db_path,
+            tokens_file=tokens_file,
+            allowed_hosts=("testserver",),
+            language="de",
+        )
+        app = create_admin_app(
+            db,
+            _FakeAuthenticator(),  # type: ignore[arg-type]
+            config=config,
+            sessions=SessionStore(
+                idle_seconds=1800,
+                absolute_seconds=28800,
+                token_factory=lambda: "test-session",
+                csrf_token_factory=lambda: "test-csrf",
+            ),
+            login_limiter=LoginRateLimiter(max_attempts=2, window_seconds=60),
+            token_store=TokenStore(tokens_file, token_factory=lambda: "gen-token"),
+        )
+        client = TestClient(app)
+        _login(client)
+
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert '<html lang="de">' in response.text
+        assert "Offene Punkte" in response.text
+        assert "Letzte Einträge" in response.text
+        # The English label is not present in the German UI.
+        assert "Open items" not in response.text
 
     def test_dashboard_renders_open_items_and_digest_snapshot(
         self, admin_client: TestClient, db: JournalDB
@@ -169,10 +215,10 @@ class TestAdminApp:
         response = admin_client.get("/")
 
         assert response.status_code == 200
-        assert "Neueste offene Arbeitspunkte" in response.text
+        assert "Newest open work items" in response.text
         assert "open dashboard task" in response.text
-        assert "7 Tage Bugfixes" in response.text
-        assert "7 Tage Entscheidungen" in response.text
+        assert "Bugfixes (7 days)" in response.text
+        assert "Decisions (7 days)" in response.text
 
     def test_dashboard_open_metric_uses_total_not_preview_limit(
         self, admin_client: TestClient, db: JournalDB
@@ -193,7 +239,7 @@ class TestAdminApp:
 
         assert response.status_code == 200
         assert re.search(
-            r"Offene Punkte</span>\s*<strong>12</strong>",
+            r"Open items</span>\s*<strong>12</strong>",
             response.text,
         )
 
@@ -205,8 +251,8 @@ class TestAdminApp:
         response = admin_client.get("/")
 
         assert response.status_code == 200
-        assert 'href="http://testserver/help">Hilfe</a>' in response.text
-        assert "Workflow-Hinweise" not in response.text
+        assert 'href="http://testserver/help">Help</a>' in response.text
+        assert "Workflow notes" not in response.text
         assert "Phase-4e" not in response.text
 
     def test_help_renders_workflow_guidance(
@@ -217,15 +263,15 @@ class TestAdminApp:
         response = admin_client.get("/help")
 
         assert response.status_code == 200
-        assert "Workflow-Hinweise" in response.text
+        assert "Workflow notes" in response.text
         assert "Phase-4e" not in response.text
         assert "in_arbeit" in response.text
         assert "decision" in response.text
-        assert "Append-only Journal-Eintrag geschrieben" in response.text
-        assert "Einträge erstellen" in response.text
-        assert "Korrektur-Assistent" in response.text
-        assert "Offene Punkte" in response.text
-        assert "Suche und Filter" in response.text
+        assert "Append-only journal entry written" in response.text
+        assert "Creating entries" in response.text
+        assert "correction assistant" in response.text
+        assert "Open items" in response.text
+        assert "Search and filters" in response.text
 
     def test_dashboard_formats_timestamps_in_display_timezone(
         self, admin_client: TestClient, db: JournalDB
@@ -313,7 +359,7 @@ class TestAdminApp:
         response = admin_client.get("/projects/bramble?q=dashboard")
 
         assert response.status_code == 200
-        assert "Suchergebnisse" in response.text
+        assert "Search results" in response.text
         assert "read-only dashboard entry" in response.text
         assert len(db.read("bramble", n=10)) == before
 
@@ -325,13 +371,13 @@ class TestAdminApp:
         response = admin_client.get("/projects/bramble?assist=bugfix")
 
         assert response.status_code == 200
-        assert "Projekt-Lifecycle" in response.text
+        assert "Project lifecycle" in response.text
         assert "Lifecycle: active" in response.text
-        assert "Korrektur-Assistent" in response.text
-        assert "Append-only Journal-Eintrag erstellen." in response.text
-        assert "Bugfix erstellen" in response.text
-        assert "Korrigierte Eintrags-ID" in response.text
-        assert "Bugfix eintragen" in response.text
+        assert "Correction assistant" in response.text
+        assert "Create an append-only journal entry." in response.text
+        assert "Create bugfix" in response.text
+        assert "Corrected entry id" in response.text
+        assert "Submit bugfix" in response.text
 
     def test_project_view_prefills_assist_target_from_entry_action(
         self, admin_client: TestClient, db: JournalDB
@@ -432,7 +478,7 @@ class TestAdminApp:
         )
 
         assert response.status_code == 400
-        assert "Inhalt darf nicht leer sein." in response.text
+        assert "Content must not be empty." in response.text
         assert "Unvollständig" in response.text
         assert len(db.read("bramble", n=20)) == before
 
@@ -492,7 +538,7 @@ class TestAdminApp:
         response = admin_client.get("/search?q=sharedneedle")
 
         assert response.status_code == 200
-        assert "Globale Suche" in response.text
+        assert "Global search" in response.text
         assert "sharedneedle deployment bramble" in response.text
         assert "sharedneedle deployment elder" in response.text
 
@@ -597,11 +643,11 @@ class TestAdminApp:
         response = admin_client.get("/projects/bramble")
 
         assert response.status_code == 200
-        assert "Offene Punkte" in response.text
+        assert "Open items" in response.text
         assert "project context open task" in response.text
-        assert "Letzte Bugfixes" in response.text
-        assert "Workflow für Eintragsabschluss" in response.text
-        assert "Append-only Journal-Eintrag geschrieben" in response.text
+        assert "Recent bugfixes" in response.text
+        assert "Entry completion workflow" in response.text
+        assert "Append-only journal entry written" in response.text
 
     def test_project_open_metric_uses_total_not_preview_limit(
         self, admin_client: TestClient, db: JournalDB
@@ -622,7 +668,7 @@ class TestAdminApp:
 
         assert response.status_code == 200
         assert re.search(
-            r"Offene Punkte</span>\s*<strong>7</strong>",
+            r"Open items</span>\s*<strong>7</strong>",
             response.text,
         )
 
@@ -648,7 +694,7 @@ class TestAdminApp:
         response = admin_client.get("/projects/elder-berry")
 
         assert response.status_code == 200
-        assert "Keine offenen Punkte." in response.text
+        assert "No open items." in response.text
 
     def test_invalid_project_is_404(self, admin_client: TestClient) -> None:
         _login(admin_client)
@@ -694,7 +740,7 @@ class TestAdminApp:
         response = admin_client.get("/tokens")
 
         assert response.status_code == 200
-        assert "Token vorhanden" in response.text
+        assert "Token present" in response.text
         assert "bramble" in response.text
         assert "elder-berry" in response.text
         assert "tok-bramble" not in response.text
@@ -731,8 +777,8 @@ class TestAdminApp:
         assert dashboard.status_code == 200
         assert "berry-gym" in dashboard.text
         assert detail.status_code == 200
-        assert "0 Einträge" in detail.text
-        assert "Noch keine Journal-Einträge." in detail.text
+        assert "0 entries" in detail.text
+        assert "No journal entries yet." in detail.text
 
     def test_token_create_requires_csrf(self, admin_client: TestClient) -> None:
         _login(admin_client)
@@ -766,7 +812,7 @@ class TestAdminApp:
         assert event.target == "berry-gym"
         assert event.result == "success"
         assert "generated-token" not in str(event.details)
-        assert "0 Einträge" in response.text
+        assert "0 entries" in response.text
 
     def test_token_rotate_replaces_only_target(
         self, admin_client: TestClient

@@ -249,11 +249,13 @@ class AdminReadModel:
                 "docs",
                 "token",
             ),
+            # i18n keys, translated in the templates via t(); the data layer
+            # stays language-agnostic.
             completion_checklist=(
-                "Code/Config committed",
-                "Relevante Tests oder Smoke-Checks gelaufen",
-                "Append-only Journal-Eintrag geschrieben",
-                "Naechster Schritt explizit dokumentiert",
+                "dod_committed",
+                "dod_tests",
+                "dod_journal",
+                "dod_next_step",
             ),
         )
 

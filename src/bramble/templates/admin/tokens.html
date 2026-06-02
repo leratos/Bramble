@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}Token - Bramble Admin{% endblock %}
+{% block title %}{{ t('page_tokens') }} - Bramble Admin{% endblock %}
 
 {% block content %}
   <section class="page-head" aria-labelledby="tokens-title">
     <div>
-      <p class="eyebrow">Projektzugriff</p>
-      <h1 id="tokens-title">Token</h1>
-      <p>Bestehende Tokenwerte werden nie angezeigt.</p>
+      <p class="eyebrow">{{ t('eyebrow_project_access') }}</p>
+      <h1 id="tokens-title">{{ t('page_tokens') }}</h1>
+      <p>{{ t('text_tokens_never_shown') }}</p>
     </div>
   </section>
 
@@ -18,27 +18,27 @@
   {% if mutation %}
     <section class="notice" aria-labelledby="token-result-title">
       <h2 id="token-result-title">
-        Token {{ mutation.action }} für {{ mutation.project }}
+        Token {{ t('token_action_' ~ mutation.action) }} {{ t('label_for') }} {{ mutation.project }}
       </h2>
       {% if mutation.token %}
         <label class="secret-output">
-          <span>Neuer Token, einmalig sichtbar</span>
+          <span>{{ t('text_new_token_once') }}</span>
           <textarea readonly rows="3">{{ mutation.token }}</textarea>
         </label>
       {% endif %}
       <p>
-        Aenderung wird erst nach einem Neustart des MCP-Service aktiv.
+        {{ t('text_restart_required') }}
       </p>
       <code>{{ restart_command }}</code>
     </section>
   {% endif %}
 
-  <section class="token-layout" aria-label="Tokenverwaltung">
+  <section class="token-layout" aria-label="{{ t('aria_token_management') }}">
     <form class="action-panel" method="post" action="{{ url_for('token_create') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <h2>Neues Projekt-Token</h2>
+      <h2>{{ t('heading_new_token') }}</h2>
       <label>
-        <span>Projekt</span>
+        <span>{{ t('label_project') }}</span>
         <input
           name="project"
           pattern="^[a-z0-9][a-z0-9-]*$"
@@ -47,36 +47,36 @@
           required
         >
       </label>
-      <button type="submit">Token erzeugen</button>
+      <button type="submit">{{ t('action_create_token') }}</button>
     </form>
 
     <section class="entry-section" aria-labelledby="token-list-title">
-      <h2 id="token-list-title">Aktive Projekt-Token</h2>
+      <h2 id="token-list-title">{{ t('heading_active_tokens') }}</h2>
       <div class="token-list">
         {% for item in token_summaries %}
           <article class="token-row">
             <div>
               <h3>{{ item.project }}</h3>
-              <p class="entry-status">Token vorhanden</p>
+              <p class="entry-status">{{ t('text_token_present') }}</p>
             </div>
             <form method="post" action="{{ url_for('token_rotate', project=item.project) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button type="submit">Rotieren</button>
+              <button type="submit">{{ t('action_rotate') }}</button>
             </form>
             <form method="post" action="{{ url_for('token_revoke', project=item.project) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button class="danger" type="submit">Entfernen</button>
+              <button class="danger" type="submit">{{ t('action_remove') }}</button>
             </form>
           </article>
         {% else %}
-          <p class="empty-state">Noch keine Projekt-Token.</p>
+          <p class="empty-state">{{ t('empty_no_tokens') }}</p>
         {% endfor %}
       </div>
     </section>
 
     {% if missing_token_projects %}
       <section class="entry-section" aria-labelledby="missing-token-title">
-        <h2 id="missing-token-title">Journal-Projekte ohne Token</h2>
+        <h2 id="missing-token-title">{{ t('heading_projects_without_token') }}</h2>
         <div class="chip-list">
           {% for project in missing_token_projects %}
             <span>{{ project }}</span>

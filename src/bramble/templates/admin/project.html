@@ -5,12 +5,12 @@
 {% block content %}
   <section class="page-head" aria-labelledby="project-title">
     <div>
-      <p class="eyebrow">Projekt</p>
+      <p class="eyebrow">{{ t('eyebrow_project') }}</p>
       <h1 id="project-title">{{ summary.name }}</h1>
       <p>
-        {{ summary.entry_count }} Einträge -
+        {{ summary.entry_count }} {{ t('entries') }} -
         {% if summary.last_timestamp %}
-          letzter Eintrag
+          {{ t('last_entry') }}
           <time
             datetime="{{ summary.last_timestamp_iso() }}"
             title="{{ summary.last_timestamp_iso() }}"
@@ -18,22 +18,22 @@
             {{ summary.last_timestamp|admin_datetime }}
           </time>
         {% else %}
-          noch keine Einträge
+          {{ t('no_entries_yet') }}
         {% endif %}
       </p>
       {% if project_status %}
-        <p class="entry-status">Lifecycle: {{ project_status }}</p>
+        <p class="entry-status">{{ t('label_lifecycle') }}: {{ project_status }}</p>
       {% endif %}
     </div>
   </section>
 
   <section class="action-panel" aria-labelledby="project-status-title">
-    <h2 id="project-status-title">Projekt-Lifecycle</h2>
-    <p>Status des Projekts umschalten. Dies betrifft nur die Registry, nicht die Journal-Einträge.</p>
-    <div class="chip-list" aria-label="Aktueller Status">
-      <span>{{ project_status or 'unbekannt' }}</span>
+    <h2 id="project-status-title">{{ t('heading_project_lifecycle') }}</h2>
+    <p>{{ t('text_lifecycle_help') }}</p>
+    <div class="chip-list" aria-label="{{ t('aria_current_status') }}">
+      <span>{{ project_status or t('unknown') }}</span>
     </div>
-    <div class="chip-list" aria-label="Statuswechsel">
+    <div class="chip-list" aria-label="{{ t('aria_status_change') }}">
       {% for status in ['active', 'paused', 'archived'] %}
         <form method="post" action="{{ url_for('project_status_update', project=summary.name) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -49,31 +49,31 @@
     method="get"
     action="{{ url_for('project_detail', project=summary.name) }}"
   >
-    <label for="q">Suche</label>
-    <input id="q" name="q" value="{{ query }}" maxlength="200" placeholder="FTS5-Suche">
-    <button type="submit">Suchen</button>
+    <label for="q">{{ t('label_search') }}</label>
+    <input id="q" name="q" value="{{ query }}" maxlength="200" placeholder="{{ t('placeholder_fts') }}">
+    <button type="submit">{{ t('action_search') }}</button>
     {% if query %}
-      <a href="{{ url_for('project_detail', project=summary.name) }}">Zurücksetzen</a>
+      <a href="{{ url_for('project_detail', project=summary.name) }}">{{ t('action_reset') }}</a>
     {% endif %}
   </form>
 
-  <section class="metric-grid" aria-label="Projektkontext">
+  <section class="metric-grid" aria-label="{{ t('aria_project_context') }}">
     <article class="metric">
-      <span>Offene Punkte</span>
+      <span>{{ t('metric_open_items') }}</span>
       <strong>{{ project_context.open_item_count }}</strong>
     </article>
     <article class="metric">
-      <span>Letzte Bugfixes</span>
+      <span>{{ t('metric_recent_bugfixes') }}</span>
       <strong>{{ project_context.recent_bugfixes|length }}</strong>
     </article>
     <article class="metric">
-      <span>Letzte Entscheidungen</span>
+      <span>{{ t('metric_recent_decisions') }}</span>
       <strong>{{ project_context.recent_decisions|length }}</strong>
     </article>
   </section>
 
   <section class="entry-section" aria-labelledby="context-open-title">
-    <h2 id="context-open-title">Neueste offene Punkte</h2>
+    <h2 id="context-open-title">{{ t('heading_recent_open_items') }}</h2>
     <div class="entry-list">
       {% for entry in project_context.open_items %}
         <article class="entry" id="open-{{ entry.id }}">
@@ -94,40 +94,40 @@
           <p class="entry-content">{{ entry.content|admin_text }}</p>
         </article>
       {% else %}
-        <p class="empty-state">Keine offenen Punkte.</p>
+        <p class="empty-state">{{ t('empty_no_open') }}</p>
       {% endfor %}
     </div>
   </section>
 
   <section class="action-panel" aria-labelledby="project-workflow-title">
-    <h2 id="project-workflow-title">Workflow für Eintragsabschluss</h2>
-    <p>Empfohlene Statuswerte und DoD für dieses Projekt.</p>
-    <div class="chip-list" aria-label="Status-Empfehlung">
+    <h2 id="project-workflow-title">{{ t('heading_workflow_completion') }}</h2>
+    <p>{{ t('text_workflow_help') }}</p>
+    <div class="chip-list" aria-label="{{ t('aria_status_recommendation') }}">
       {% for status in workflow.statuses %}
         <span>{{ status }}</span>
       {% endfor %}
     </div>
-    <div class="chip-list" aria-label="Tag-Vorschläge">
+    <div class="chip-list" aria-label="{{ t('aria_tag_suggestions') }}">
       {% for tag in workflow.suggested_tags %}
         <span>{{ tag }}</span>
       {% endfor %}
     </div>
     <ul>
       {% for item in workflow.completion_checklist %}
-        <li>{{ item }}</li>
+        <li>{{ t(item) }}</li>
       {% endfor %}
     </ul>
   </section>
 
   <section class="action-panel" aria-labelledby="correction-assist-title">
-    <h2 id="correction-assist-title">Korrektur-Assistent</h2>
-    <p>Append-only Journal-Eintrag erstellen.</p>
+    <h2 id="correction-assist-title">{{ t('heading_correction_assistant') }}</h2>
+    <p>{{ t('text_correction_help') }}</p>
     <div class="chip-list">
-      <a href="{{ url_for('project_detail', project=summary.name) }}?assist=notiz">Nachtrag erstellen</a>
-      <a href="{{ url_for('project_detail', project=summary.name) }}?assist=bugfix">Bugfix erstellen</a>
+      <a href="{{ url_for('project_detail', project=summary.name) }}?assist=notiz">{{ t('action_create_note') }}</a>
+      <a href="{{ url_for('project_detail', project=summary.name) }}?assist=bugfix">{{ t('action_create_bugfix') }}</a>
     </div>
     {% if assist_success_id %}
-      <p class="alert success" role="status">Journal-Eintrag #{{ assist_success_id }} wurde erstellt.</p>
+      <p class="alert success" role="status">{{ t('msg_entry_created') }} #{{ assist_success_id }}</p>
     {% endif %}
     {% if assist_error %}
       <p class="alert" role="alert">{{ assist_error }}</p>
@@ -140,20 +140,20 @@
       >
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="assist" value="notiz">
-        <h3>Nachtrag erstellen</h3>
-        <p>Status: <strong>notiz</strong></p>
+        <h3>{{ t('action_create_note') }}</h3>
+        <p>{{ t('label_status') }}: <strong>notiz</strong></p>
         <div class="assist-grid">
           <label>
-            Titel
+            {{ t('label_title') }}
             <input name="title" value="{{ assist_form.title }}" maxlength="{{ journal_title_max }}">
           </label>
           <label>
-            Phase
+            {{ t('label_phase') }}
             <input name="phase" value="{{ assist_form.phase }}" maxlength="{{ journal_phase_max }}">
           </label>
         </div>
         <label>
-          Inhalt
+          {{ t('label_content') }}
           <textarea
             name="content"
             rows="8"
@@ -163,7 +163,7 @@
         </label>
         <div class="assist-grid">
           <label>
-            Tags
+            {{ t('label_tags') }}
             <input
               name="tags"
               value="{{ assist_form.tags }}"
@@ -172,7 +172,7 @@
             >
           </label>
           <label>
-            Bezugs-Eintrags-ID
+            {{ t('label_reference_id') }}
             <input
               name="link_entry_id"
               type="number"
@@ -181,8 +181,8 @@
             >
           </label>
         </div>
-        <p class="entry-status">Relation bei ID: adds_context_to</p>
-        <button type="submit">Journal-Eintrag erstellen</button>
+        <p class="entry-status">{{ t('text_relation_adds_context') }}</p>
+        <button type="submit">{{ t('action_create_entry') }}</button>
       </form>
     {% elif assist_mode == 'bugfix' %}
       <form
@@ -192,20 +192,20 @@
       >
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="assist" value="bugfix">
-        <h3>Bugfix erstellen</h3>
-        <p>Status: <strong>bugfix</strong></p>
+        <h3>{{ t('action_create_bugfix') }}</h3>
+        <p>{{ t('label_status') }}: <strong>bugfix</strong></p>
         <div class="assist-grid">
           <label>
-            Titel
+            {{ t('label_title') }}
             <input name="title" value="{{ assist_form.title }}" maxlength="{{ journal_title_max }}">
           </label>
           <label>
-            Phase
+            {{ t('label_phase') }}
             <input name="phase" value="{{ assist_form.phase }}" maxlength="{{ journal_phase_max }}">
           </label>
         </div>
         <label>
-          Inhalt
+          {{ t('label_content') }}
           <textarea
             name="content"
             rows="8"
@@ -215,7 +215,7 @@
         </label>
         <div class="assist-grid">
           <label>
-            Tags
+            {{ t('label_tags') }}
             <input
               name="tags"
               value="{{ assist_form.tags }}"
@@ -224,7 +224,7 @@
             >
           </label>
           <label>
-            Korrigierte Eintrags-ID
+            {{ t('label_corrected_id') }}
             <input
               name="link_entry_id"
               type="number"
@@ -233,8 +233,8 @@
             >
           </label>
         </div>
-        <p class="entry-status">Relation bei ID: corrects</p>
-        <button type="submit">Bugfix eintragen</button>
+        <p class="entry-status">{{ t('text_relation_corrects') }}</p>
+        <button type="submit">{{ t('action_submit_bugfix') }}</button>
       </form>
     {% endif %}
   </section>
@@ -244,7 +244,7 @@
   {% endif %}
 
   <section class="entry-section" aria-labelledby="journal-title">
-    <h2 id="journal-title">{% if query %}Suchergebnisse{% else %}Journal{% endif %}</h2>
+    <h2 id="journal-title">{% if query %}{{ t('heading_search_results') }}{% else %}{{ t('heading_journal') }}{% endif %}</h2>
     <div class="entry-list">
       {% for entry in entries %}
         <article class="entry" id="entry-{{ entry.id }}">
@@ -266,21 +266,21 @@
                 </p>
               {% endif %}
               {% if entry.tags %}
-                <div class="chip-list" aria-label="Tags">
+                <div class="chip-list" aria-label="{{ t('aria_tags') }}">
                   {% for tag in entry.tags %}
                     <span>{{ tag }}</span>
                   {% endfor %}
                 </div>
               {% endif %}
               {% if entry.links %}
-                <div class="chip-list" aria-label="Links">
+                <div class="chip-list" aria-label="{{ t('aria_links') }}">
                   {% for link in entry.links %}
                     <span>{{ link.relation.value }} #{{ link.entry_id }}</span>
                   {% endfor %}
                 </div>
               {% endif %}
               {% if entry.backlinks %}
-                <div class="chip-list" aria-label="Backlinks">
+                <div class="chip-list" aria-label="{{ t('aria_backlinks') }}">
                   {% for link in entry.backlinks %}
                     <span>{{ link.relation.value }} from #{{ link.entry_id }}</span>
                   {% endfor %}
@@ -288,9 +288,9 @@
               {% endif %}
             </div>
             {% if entry.id %}
-              <nav class="entry-actions" aria-label="Korrekturaktionen">
-                <a href="{{ url_for('project_detail', project=summary.name) }}?assist=notiz&entry_id={{ entry.id }}#correction-assist-title">Nachtrag</a>
-                <a href="{{ url_for('project_detail', project=summary.name) }}?assist=bugfix&entry_id={{ entry.id }}#correction-assist-title">Bugfix</a>
+              <nav class="entry-actions" aria-label="{{ t('aria_correction_actions') }}">
+                <a href="{{ url_for('project_detail', project=summary.name) }}?assist=notiz&entry_id={{ entry.id }}#correction-assist-title">{{ t('action_note') }}</a>
+                <a href="{{ url_for('project_detail', project=summary.name) }}?assist=bugfix&entry_id={{ entry.id }}#correction-assist-title">{{ t('action_bugfix') }}</a>
               </nav>
             {% endif %}
           </header>
@@ -309,9 +309,9 @@
         </article>
       {% else %}
         {% if query %}
-          <p class="empty-state">Keine passenden Einträge.</p>
+          <p class="empty-state">{{ t('empty_no_matches') }}</p>
         {% else %}
-          <p class="empty-state">Noch keine Journal-Einträge.</p>
+          <p class="empty-state">{{ t('empty_no_entries') }}</p>
         {% endif %}
       {% endfor %}
     </div>

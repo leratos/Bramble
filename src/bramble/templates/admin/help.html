@@ -1,61 +1,61 @@
 {% extends "base.html" %}
 
-{% block title %}Hilfe - Bramble Admin{% endblock %}
+{% block title %}{{ t('page_help') }} - Bramble Admin{% endblock %}
 
 {% block content %}
   <section class="page-head" aria-labelledby="help-title">
     <div>
-      <p class="eyebrow">Hilfe</p>
-      <h1 id="help-title">Hilfe</h1>
-      <p>Kurzer Leitfaden für Journal-Arbeit und Admin-UI.</p>
+      <p class="eyebrow">{{ t('page_help') }}</p>
+      <h1 id="help-title">{{ t('page_help') }}</h1>
+      <p>{{ t('text_help_intro') }}</p>
     </div>
   </section>
 
   <section class="action-panel" aria-labelledby="workflow-title">
-    <h2 id="workflow-title">Workflow-Hinweise</h2>
-    <p>Journal-Einträge bleiben append-only. Bestehende Einträge werden nicht editiert oder gelöscht; Korrekturen werden als neuer Nachtrag oder Bugfix ergänzt.</p>
+    <h2 id="workflow-title">{{ t('heading_workflow_notes') }}</h2>
+    <p>{{ t('text_help_appendonly') }}</p>
 
-    <p><strong>Status-Empfehlung:</strong></p>
-    <div class="chip-list" aria-label="Status-Empfehlung">
+    <p><strong>{{ t('label_status_recommendation') }}</strong></p>
+    <div class="chip-list" aria-label="{{ t('aria_status_recommendation') }}">
       {% for status in workflow.statuses %}
         <span>{{ status }}</span>
       {% endfor %}
     </div>
 
-    <p><strong>Tag-Vorschläge:</strong></p>
-    <div class="chip-list" aria-label="Tag-Vorschläge">
+    <p><strong>{{ t('label_tag_suggestions') }}</strong></p>
+    <div class="chip-list" aria-label="{{ t('aria_tag_suggestions') }}">
       {% for tag in workflow.suggested_tags %}
         <span>{{ tag }}</span>
       {% endfor %}
     </div>
 
-    <p><strong>Abschluss-Checkliste:</strong></p>
+    <p><strong>{{ t('label_completion_checklist') }}</strong></p>
     <ul>
       {% for item in workflow.completion_checklist %}
-        <li>{{ item }}</li>
+        <li>{{ t(item) }}</li>
       {% endfor %}
     </ul>
   </section>
 
   <section class="action-panel" aria-labelledby="entry-help-title">
-    <h2 id="entry-help-title">Einträge erstellen</h2>
-    <p>Der Korrektur-Assistent auf jeder Projektseite erstellt neue Journal-Einträge direkt in diesem Projekt.</p>
+    <h2 id="entry-help-title">{{ t('heading_create_entries') }}</h2>
+    <p>{{ t('text_help_assistant') }}</p>
     <ul>
-      <li><strong>Nachtrag:</strong> nutzt den Status <code>notiz</code> und kann per Bezugs-ID Kontext zu einem bestehenden Eintrag ergänzen.</li>
-      <li><strong>Bugfix:</strong> nutzt den Status <code>bugfix</code> und kann per korrigierter Eintrags-ID eine <code>corrects</code>-Relation setzen.</li>
-      <li>Aktionslinks an Einträgen füllen die passende Bezugs-ID automatisch vor.</li>
+      <li>{{ t('text_help_note') }}</li>
+      <li>{{ t('text_help_bugfix') }}</li>
+      <li>{{ t('text_help_action_links') }}</li>
     </ul>
   </section>
 
   <section class="action-panel" aria-labelledby="open-help-title">
-    <h2 id="open-help-title">Offene Punkte</h2>
-    <p>Die Kennzahl zeigt alle effektiv offenen Punkte. Die Listen sind bewusst begrenzte Vorschauen: Dashboard zeigt die neuesten 10, Projektseiten zeigen die neuesten 5.</p>
-    <p>Ein offener Punkt gilt als geschlossen, wenn ein neuerer Abschluss, Bugfix oder Nachtrag ihn eindeutig per Link, Textverweis, Phase, Titel oder Basis-Titel abdeckt.</p>
+    <h2 id="open-help-title">{{ t('heading_help_open_items') }}</h2>
+    <p>{{ t('text_help_open_1') }}</p>
+    <p>{{ t('text_help_open_2') }}</p>
   </section>
 
   <section class="action-panel" aria-labelledby="search-help-title">
-    <h2 id="search-help-title">Suche und Filter</h2>
-    <p>Die globale Suche nutzt SQLite FTS5. Status, Projekt, Zeitraum und Tags schränken Treffer ein; mehrere Tags werden gemeinsam angewendet.</p>
-    <p>Für einfache Suche reichen normale Wörter. Für exakte Formulierungen können Begriffe in Anführungszeichen gesetzt werden.</p>
+    <h2 id="search-help-title">{{ t('heading_search_filter') }}</h2>
+    <p>{{ t('text_help_search_1') }}</p>
+    <p>{{ t('text_help_search_2') }}</p>
   </section>
 {% endblock %}

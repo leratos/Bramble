@@ -369,4 +369,10 @@ def test_workflow_guidance_returns_phase_4e_defaults(db: JournalDB) -> None:
     assert guidance.statuses == ("in_arbeit", "abgeschlossen", "notiz", "bugfix")
     assert "decision" in guidance.suggested_tags
     assert "deployment" in guidance.suggested_tags
-    assert any("Append-only" in item for item in guidance.completion_checklist)
+    # i18n keys (translated in the templates), not literal prose.
+    assert guidance.completion_checklist == (
+        "dod_committed",
+        "dod_tests",
+        "dod_journal",
+        "dod_next_step",
+    )

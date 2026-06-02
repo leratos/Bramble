@@ -67,3 +67,7 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM"]
 # UP047 (PEP 695 type parameters) would rewrite the translate_errors
 # decorator's TypeVar/ParamSpec signature; deferred as a modernization.
 ignore = ["UP047"]
+
+[tool.ruff.lint.per-file-ignores]
+# The admin i18n catalog holds long translation strings on single lines.
+"src/bramble/admin_i18n.py" = ["E501"]

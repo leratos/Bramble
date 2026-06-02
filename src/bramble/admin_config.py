@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from zoneinfo import ZoneInfoNotFoundError
 
+from bramble.admin_i18n import DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES
 from bramble.admin_time import get_display_timezone
 from bramble.server_config import ENV_DB_PATH, ENV_TOKENS_FILE
 
@@ -37,6 +38,7 @@ ENV_ADMIN_LOGIN_WINDOW_SECONDS = "BRAMBLE_ADMIN_LOGIN_WINDOW_SECONDS"
 ENV_ADMIN_COOKIE_SECURE = "BRAMBLE_ADMIN_COOKIE_SECURE"
 ENV_ADMIN_ALLOWED_HOSTS = "BRAMBLE_ADMIN_ALLOWED_HOSTS"
 ENV_ADMIN_TIME_ZONE = "BRAMBLE_ADMIN_TIME_ZONE"
+ENV_ADMIN_LANGUAGE = "BRAMBLE_ADMIN_LANGUAGE"
 
 _VALID_LOG_LEVELS: frozenset[str] = frozenset(
     {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
@@ -60,6 +62,7 @@ class AdminConfig:
     cookie_secure: bool = False
     allowed_hosts: tuple[str, ...] = _DEFAULT_ALLOWED_HOSTS
     display_timezone: str = _DEFAULT_DISPLAY_TIMEZONE
+    language: str = DEFAULT_LANGUAGE
 
     def __post_init__(self) -> None:
         self._validate_db_path()
@@ -75,6 +78,7 @@ class AdminConfig:
         self._validate_cookie_secure()
         self._validate_allowed_hosts()
         self._validate_display_timezone()
+        self._validate_language()
         if self.session_absolute_seconds < self.session_idle_seconds:
             raise ValueError(
                 "session_absolute_seconds must be >= session_idle_seconds"
@@ -156,6 +160,15 @@ class AdminConfig:
                 f"display_timezone {self.display_timezone!r} is not a valid "
                 "or supported timezone"
             ) from exc
+
+    def _validate_language(self) -> None:
+        if not isinstance(self.language, str):
+            raise TypeError("language must be a string")
+        if self.language not in SUPPORTED_LANGUAGES:
+            allowed = ", ".join(SUPPORTED_LANGUAGES)
+            raise ValueError(
+                f"language {self.language!r} is not allowed; must be one of: {allowed}"
+            )
 
     @classmethod
     def from_sources(
@@ -241,6 +254,11 @@ class AdminConfig:
                 env_value=environ.get(ENV_ADMIN_TIME_ZONE),
                 default=_DEFAULT_DISPLAY_TIMEZONE,
             ),
+            language=_resolve_str(
+                cli=ns.language,
+                env_value=environ.get(ENV_ADMIN_LANGUAGE),
+                default=DEFAULT_LANGUAGE,
+            ).strip().lower(),
         )
 
 
@@ -323,6 +341,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "IANA timezone for admin timestamp display "
             f"(env: {ENV_ADMIN_TIME_ZONE}; default: {_DEFAULT_DISPLAY_TIMEZONE})."
+        ),
+    )
+    parser.add_argument(
+        "--language",
+        dest="language",
+        choices=SUPPORTED_LANGUAGES,
+        help=(
+            "Admin UI language "
+            f"(env: {ENV_ADMIN_LANGUAGE}; default: {DEFAULT_LANGUAGE})."
         ),
     )
     return parser
