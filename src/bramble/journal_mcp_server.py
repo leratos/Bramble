@@ -232,8 +232,8 @@ def _mcp_source(source: str | None) -> str:
 def _default_resolve_content(ids: list[int]) -> str:
     refs = ", ".join(f"#{entry_id}" for entry_id in ids)
     return (
-        "Statusabschluss (append-only): schliesst die folgenden offenen "
-        f"Punkte per resolves-Link: {refs}."
+        "Status closure (append-only): closes the following open items "
+        f"via resolves links: {refs}."
     )
 
 

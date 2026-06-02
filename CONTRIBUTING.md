@@ -1,11 +1,11 @@
-# Beitragen zu Bramble
+# Contributing to Bramble
 
-Danke für dein Interesse! Bramble ist ein self-hosted MCP-Server für ein
-projektübergreifendes Entwicklungsjournal. Bitte lies vor einem Beitrag das
-[Sicherheitsmodell](SECURITY.md) — insbesondere, dass Lesen projektübergreifend
-ist und es keine Mandantentrennung gibt.
+Thanks for your interest! Bramble is a self-hosted MCP server for a
+cross-project development journal. Before contributing, please read the
+[security model](SECURITY.md) — in particular that reading is cross-project
+and there is no tenant isolation.
 
-## Entwicklungsumgebung
+## Development environment
 
 Python 3.12.
 
@@ -16,7 +16,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-Versionierte git-Hooks aktivieren (Branch-Policy + pytest vor dem Push):
+Enable the versioned git hooks (branch policy + pytest before push):
 
 ```bash
 git config core.hooksPath .githooks
@@ -24,43 +24,43 @@ git config core.hooksPath .githooks
 
 ## Tests
 
-- Runner: `pytest` aus dem Projekt-Root.
-- `asyncio_mode = "auto"` (siehe `pyproject.toml`).
-- Tests liegen flach in `tests/`, Namenskonvention `test_{modul}.py`.
-- Jede Änderung mit Tests absichern: Happy Path, wichtigste Fehlerfälle,
-  relevante Edge Cases. Mocks bevorzugt mit `unittest.mock`.
-- Vor einem PR muss die volle Suite grün sein; die CI führt sie ebenfalls aus.
+- Runner: `pytest` from the project root.
+- `asyncio_mode = "auto"` (see `pyproject.toml`).
+- Tests live flat in `tests/`, named `test_{module}.py`.
+- Cover every change with tests: happy path, the most important error cases,
+  relevant edge cases. Prefer `unittest.mock` for mocks.
+- The full suite must be green before a PR; CI runs it too.
 
-## Branches und Commits
+## Branches and commits
 
-- Keine direkten Commits auf `main` (der pre-commit-Hook verweigert das).
-- Feature-Arbeit: `feature/kurzbeschreibung`; Bugfix: `fix/...`;
-  reine Tooling-/Doku-Änderungen: `chore/...` bzw. `docs/...`.
-  Branch-Namen lowercase mit Bindestrichen.
-- Aussagekräftige Commit-Messages (gerne Conventional-Commits-Stil:
+- No direct commits to `main` (the pre-commit hook refuses them).
+- Feature work: `feature/short-description`; bugfix: `fix/...`;
+  tooling/docs-only changes: `chore/...` or `docs/...`. Branch names are
+  lowercase with hyphens.
+- Meaningful commit messages (Conventional Commits style welcome:
   `feat(...)`, `fix(...)`, `docs(...)`, `chore(...)`).
 
-## Code-Stil
+## Code style
 
-- OOP: eine Klasse pro Datei (`snake_case`-Dateiname), Kommunikation über
-  klare Interfaces, Dependency Injection über den Konstruktor.
-- **Append-only-Invariant**: keine `update`/`delete`-Tools oder -Pfade am
-  Journal. Korrekturen sind neue Einträge.
-- Linting: ruff (`line-length = 100`, Regeln `E,F,W,I,B,UP,SIM` in
-  `pyproject.toml`). Bitte vor dem PR lokal `ruff check .` laufen lassen.
-- Logging über `logging.getLogger(__name__)`, kein `print()` für
-  Fehler/Warnungen; spezifische Exceptions fangen, kein bare `except`.
-- Neue Laufzeit-Dependencies nur mit Begründung im PR.
+- OOP: one class per file (`snake_case` filename), communication through
+  clear interfaces, dependency injection through the constructor.
+- **Append-only invariant**: no `update`/`delete` tools or paths on the
+  journal. Corrections are new entries.
+- Linting: ruff (`line-length = 100`, rules `E,F,W,I,B,UP,SIM` in
+  `pyproject.toml`). Please run `ruff check .` locally before a PR.
+- Log via `logging.getLogger(__name__)`, no `print()` for errors/warnings;
+  catch specific exceptions, never a bare `except`.
+- New runtime dependencies only with justification in the PR.
 
-## Pull Requests
+## Pull requests
 
-1. Branch von `main` abzweigen, Änderung + Tests umsetzen.
-2. Volle Suite grün, ruff sauber.
-3. PR gegen `main` öffnen; die CI muss durchlaufen.
-4. Beiträge werden unter der [Apache-2.0-Lizenz](LICENSE) angenommen.
+1. Branch off `main`, implement the change plus tests.
+2. Full suite green, ruff clean.
+3. Open a PR against `main`; CI must pass.
+4. Contributions are accepted under the [Apache-2.0 license](LICENSE).
 
-## Hinweis für KI-Agenten
+## Note for AI agents
 
-Für LLM-gestützte Beiträge gibt es zusätzlich [AGENTS.md](AGENTS.md). Der
-Maintainer pflegt das laufende Projektgedächtnis im Bramble-MCP-Journal;
-externe Beitragende brauchen dafür kein Token.
+For LLM-assisted contributions there is also [AGENTS.md](AGENTS.md). The
+maintainer keeps the running project memory in the Bramble MCP journal;
+external contributors do not need a token for that.
