@@ -1,5 +1,10 @@
 # Bramble
 
+[![CI](https://github.com/leratos/Bramble/actions/workflows/ci.yml/badge.svg)](https://github.com/leratos/Bramble/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
 > 🌐 **English version: [README.md](README.md).** Diese Datei ist die deutsche
 > Fassung und wird vom Maintainer gepflegt; bei Abweichungen ist die
 > englische README maßgeblich.
