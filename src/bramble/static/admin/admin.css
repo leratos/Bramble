@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
   --bg: #f5f6f3;
   --surface: #ffffff;
   --surface-strong: #ecf1ea;
@@ -8,9 +8,41 @@
   --line: #d8ded5;
   --accent: #256d46;
   --accent-strong: #16452c;
+  --link: #256d46;
+  --link-strong: #16452c;
   --warn-bg: #fff4d7;
   --warn-text: #6d4d00;
+  --warn-border: #e4c35c;
+  --ok-bg: #edf8f0;
+  --ok-text: #1f5d36;
+  --ok-border: #a8d3b5;
+  --code-bg: #f8faf7;
+  --topbar-bg: rgba(255, 255, 255, 0.96);
   --focus: #0f766e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1417;
+    --surface: #171d21;
+    --surface-strong: #1f262b;
+    --text: #e7ece9;
+    --muted: #93a39a;
+    --line: #2c353a;
+    --accent: #2e8159;
+    --accent-strong: #3c9568;
+    --link: #5cc88c;
+    --link-strong: #82d9aa;
+    --warn-bg: #332a10;
+    --warn-text: #e8c66a;
+    --warn-border: #6b561f;
+    --ok-bg: #15301e;
+    --ok-text: #8fd9a6;
+    --ok-border: #2c5a3a;
+    --code-bg: #1f2629;
+    --topbar-bg: rgba(18, 23, 26, 0.94);
+    --focus: #2dd4bf;
+  }
 }
 
 * {
@@ -27,12 +59,12 @@ body {
 }
 
 a {
-  color: var(--accent);
+  color: var(--link);
   text-decoration: none;
 }
 
 a:hover {
-  color: var(--accent-strong);
+  color: var(--link-strong);
   text-decoration: underline;
 }
 
@@ -70,6 +102,7 @@ select {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 6px;
+  background: var(--surface);
   color: var(--text);
   padding: 0.65rem 0.75rem;
 }
@@ -92,7 +125,7 @@ code {
   display: inline-block;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #f8faf7;
+  background: var(--code-bg);
   padding: 0.3rem 0.45rem;
 }
 
@@ -101,6 +134,7 @@ textarea {
   resize: vertical;
   border: 1px solid var(--line);
   border-radius: 6px;
+  background: var(--surface);
   color: var(--text);
   padding: 0.65rem 0.75rem;
 }
@@ -114,7 +148,7 @@ textarea {
   align-items: center;
   gap: 1rem;
   border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--topbar-bg);
   padding: 0.75rem 1rem;
 }
 
@@ -397,7 +431,7 @@ textarea {
 }
 
 .alert {
-  border: 1px solid #e4c35c;
+  border: 1px solid var(--warn-border);
   border-radius: 6px;
   background: var(--warn-bg);
   color: var(--warn-text);
@@ -406,9 +440,9 @@ textarea {
 }
 
 .alert.success {
-  border-color: #a8d3b5;
-  background: #edf8f0;
-  color: #1f5d36;
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
+  color: var(--ok-text);
 }
 
 .assist-form {
