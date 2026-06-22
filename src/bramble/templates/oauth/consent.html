@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bramble — authorize connector</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, sans-serif; max-width: 30rem; margin: 4rem auto;
+           padding: 0 1rem; line-height: 1.5; }
+    h1 { font-size: 1.25rem; }
+    dl { background: rgba(127,127,127,0.12); padding: 1rem; border-radius: 6px; }
+    dt { font-weight: 600; }
+    dd { margin: 0 0 0.75rem; word-break: break-all; }
+    .actions { display: flex; gap: 1rem; margin-top: 1.5rem; }
+    button { padding: 0.6rem 1.2rem; font-weight: 600; cursor: pointer; }
+    .approve { background: #1f7a3d; color: #fff; border: 0; }
+    .deny { background: transparent; }
+    .hint { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>Authorize this connector?</h1>
+  <p class="hint">A client is requesting read-only access to your Bramble journal.</p>
+  <dl>
+    <dt>Client</dt><dd>{{ client_id }}</dd>
+    <dt>Redirect URI</dt><dd>{{ redirect_uri }}</dd>
+    <dt>Requested scope</dt><dd>{{ scope or "journal:read" }}</dd>
+  </dl>
+  <form method="post" action="/oauth/consent">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="authorize_query" value="{{ authorize_query }}">
+    <div class="actions">
+      <button class="approve" type="submit" name="decision" value="approve">Allow</button>
+      <button class="deny" type="submit" name="decision" value="deny">Deny</button>
+    </div>
+  </form>
+</body>
+</html>

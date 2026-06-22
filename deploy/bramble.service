@@ -42,6 +42,14 @@ Environment=BRAMBLE_ENABLE_OAUTH=false
 Environment=BRAMBLE_OAUTH_PUBLIC_BASE_URL=https://journal.last-strawberry.com
 Environment=BRAMBLE_OAUTH_DB_PATH=/opt/bramble/data/oauth.db
 
+# Resource-owner gate (Phase 6.6): /authorize requires the owner to log in
+# and consent before a code is issued. A DEDICATED Argon2id secret, separate
+# from the SSH-tunnelled admin UI. Create it (mode 600, owned by bramble):
+#   python scripts/gen_admin_secret.py \
+#       --output /opt/bramble/secrets/oauth-owner.json --username owner
+# The server refuses to start in OAuth mode if this file is missing.
+Environment=BRAMBLE_OAUTH_OWNER_SECRET_FILE=/opt/bramble/secrets/oauth-owner.json
+
 # Confidential static client secret (the DCR fallback) and any other OAuth
 # secrets live here, never in the repo. The leading '-' makes the file
 # optional, so a DCR-only deployment needs none. Create it with

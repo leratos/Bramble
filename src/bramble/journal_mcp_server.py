@@ -506,6 +506,7 @@ class JournalMCPServer:
         auth_validator: AuthValidator | None = None,
         rate_limiter: RateLimiter | None = None,
         auth_provider: AuthProvider | None = None,
+        http_middleware: list[Any] | None = None,
     ) -> None:
         if not isinstance(db, JournalDB):
             raise TypeError("db must be a JournalDB instance")
@@ -528,6 +529,9 @@ class JournalMCPServer:
         self._auth_validator = auth_validator
         self._rate_limiter = rate_limiter
         self._auth_provider = auth_provider
+        # ASGI middleware (e.g. the OAuth owner-login gate) attached to the
+        # served http app. Empty for stdio / the legacy static-http path.
+        self._http_middleware: list[Any] = list(http_middleware or [])
 
         app_kwargs: dict[str, Any] = {
             "name": "bramble",
@@ -959,7 +963,16 @@ class JournalMCPServer:
                 "starting MCP server on http",
                 extra={"host": host, "port": port},
             )
-            self._app.run(transport="http", host=host, port=port)
+            if self._http_middleware:
+                # Serve the http app with extra ASGI middleware (the OAuth
+                # owner gate). FastMCP's own run() does not take ASGI
+                # middleware, so build the app and serve it via uvicorn.
+                import uvicorn
+
+                http_app = self._app.http_app(middleware=self._http_middleware)
+                uvicorn.run(http_app, host=host, port=port)
+            else:
+                self._app.run(transport="http", host=host, port=port)
         else:
             raise ValueError(
                 f"unsupported transport {transport!r}; expected 'stdio' or 'http'"

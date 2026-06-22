@@ -75,6 +75,9 @@ Server (AS) plus Resource-Server-Schutz für den `/mcp`-Endpoint. Der **Go-Live*
 | `src/bramble/server_config.py` | `enable_oauth`-Master-Switch (CLI/Env). |
 | `src/bramble/journal_mcp_server.py` | `auth_provider`-Modus + `_PrincipalRateLimitMiddleware`. |
 | `src/bramble/__main__.py` | http-OAuth-Stack (MultiAuth) + optionales Seeding des statischen Clients. |
+| `src/bramble/oauth_owner_gate.py` | `OAuthOwnerGate` (6.6) – ASGI-Login/Consent-Gate auf `/authorize`. |
+| `src/bramble/consent_store.py` | `ConsentApprovalStore` – einmalige, fingerprint-gebundene Consent-Freigaben. |
+| `src/bramble/templates/oauth/*.html` | Login-/Consent-/Denied-Seiten (autoescaped). |
 | `scripts/gen_oauth_client.py` | erzeugt die Credentials des statischen Fallback-Clients (Env-Block). |
 
 Zwei bewusste Abweichungen vom In-Memory-Referenzprovider:
@@ -85,11 +88,38 @@ Zwei bewusste Abweichungen vom In-Memory-Referenzprovider:
    bleibt erhalten (sonst wäre der Refresh-Flow kaputt). Nur explizites
    `revoke_token` kaskadiert auf den Partner.
 
+## Phase 6.6 – Resource-Owner-Gate auf `/authorize` (P1-Fix)
+
+Ohne Owner-Authentifizierung stellt ein Self-Hosted-AS Codes an jeden aus, der
+`/authorize` erreicht — ein selbst-registrierter DCR-Client (eigene
+`redirect_uri` + eigenes PKCE) bekäme so einen Read-Token aufs ganze Journal.
+`OAuthOwnerGate` (rohe ASGI-Middleware, NICHT `BaseHTTPMiddleware` — letztere
+würde die `/mcp`-Streaming-Antwort puffern) gated **nur** `/authorize` +
+`/oauth/login` + `/oauth/consent`; alles andere geht unverändert durch.
+
+Ablauf: GET `/authorize` ohne Session → Login-Seite (Original-Query als `next`
+mitgeführt) → POST `/oauth/login` (rate-limited, Argon2id) → Session +
+`HttpOnly`/`SameSite=Strict`-Cookie → Consent-Seite (zeigt Client/Redirect/
+Scope, CSRF-Token) → POST `/oauth/consent` (CSRF-geprüft) Approve → einmalige,
+per Fingerprint (client_id|redirect_uri|scope|code_challenge) an die Anfrage
+gebundene Freigabe → GET `/authorize` delegiert per `call_next` an den
+Framework-Handler. Der **CSRF-geschützte Consent** verhindert Login-CSRF-
+Forced-Authorization: selbst wenn ein Angreifer den Owner zum Login zwingt,
+kann er den Consent-POST nicht fälschen (kein Session-CSRF-Token) → kein Code.
+
+Wiederverwendung: `bramble.admin_auth` (`AdminAuthenticator`, `SessionStore`,
+`LoginRateLimiter`) gegen eine **dedizierte** `oauth-owner.json` (getrennt von
+der admin-ui.json der SSH-getunnelten Admin-UI). Erzeugen:
+`python scripts/gen_admin_secret.py --output secrets/oauth-owner.json
+--username owner`. Fehlt die Datei, startet der Server im OAuth-Modus nicht
+(fail-fast). Templates autoescaped (Consent echot client-beeinflusste Werte).
+
 ## Endpoints / Discovery (am Root)
 
 - `GET /.well-known/oauth-authorization-server` (RFC 8414)
 - `GET /.well-known/oauth-protected-resource/mcp` (RFC 9728 – **pfad-suffixiert**)
-- `GET|POST /authorize`, `POST /token`, `POST /register`, `POST /revoke`
+- `GET /authorize` (Owner-Gate: Login+Consent), `POST /oauth/login`,
+  `POST /oauth/consent`, `POST /token`, `POST /register`, `POST /revoke`
 
 ## Deployment
 
@@ -133,6 +163,7 @@ und kurzlebig. Siehe `deploy/fail2ban/bramble-jail.conf`.
 - [x] Beide well-known-Endpoints liefern spec-konformes JSON (Test).
 - [x] Lokaler/Static-Bearer-Pfad unverändert (Regression grün).
 - [x] nginx/systemd/fail2ban-Änderungen im Repo.
+- [x] `/authorize` erzwingt Owner-Login + CSRF-geschützten Consent (P1, 6.6).
 - [ ] Connector real in Claude Web verbinden (echter OAuth-Flow) – Go-Live.
 - [ ] `journal_context` über den Web-Connector liefert echte Einträge – Go-Live.
 
@@ -142,6 +173,9 @@ und kurzlebig. Siehe `deploy/fail2ban/bramble-jail.conf`.
   liest“ ist Framework-Glue (über `MultiAuth.verify_token` und die
   Middleware-Unit-Tests separat abgedeckt) und wird beim echten Claude-Connect
   endgültig verifiziert.
+- `/token` und `/register` (DCR) sind weiterhin ohne Bramble-Rate-Limit (Codex
+  P2 #7); `/authorize` ist durch den Owner-Login entschärft. Offenes Register
+  = geringes Disk-DoS-Risiko; nach Go-Live beobachten, ggf. Registrierungs-Cap.
 - Compliance-Gate `bramble#658` (Punkte 1–5) ist Voraussetzung für den Go-Live.
 - DeutschlandGPT als Remote-MCP-Client ist weiterhin unbestätigt (Show-Stopper-
   Check aus `bramble#658`).

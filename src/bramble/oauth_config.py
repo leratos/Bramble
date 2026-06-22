@@ -40,6 +40,17 @@ _DEFAULT_ACCESS_TOKEN_TTL = 3600  # 1 hour
 _DEFAULT_REFRESH_TOKEN_TTL: int | None = 2_592_000  # 30 days; None = never
 _DEFAULT_AUTH_CODE_TTL = 300  # 5 minutes (short-lived, single-use)
 
+# Phase-6.6 resource-owner gate on /authorize. The AS must authenticate the
+# owner (and take explicit consent) before issuing a code, else any
+# self-registered client could mint a read token. Reuses the admin Argon2
+# primitives against a DEDICATED secret file (separate from the admin UI).
+_DEFAULT_OWNER_SECRET_FILE = Path("./secrets/oauth-owner.json")
+_DEFAULT_OWNER_SESSION_IDLE_SECONDS = 900  # 15 min
+_DEFAULT_OWNER_SESSION_ABSOLUTE_SECONDS = 28_800  # 8 h
+_DEFAULT_OWNER_LOGIN_MAX_ATTEMPTS = 5
+_DEFAULT_OWNER_LOGIN_WINDOW_SECONDS = 300  # 5 min
+_DEFAULT_OWNER_COOKIE_SECURE = True
+
 # Hosts for which a plain-http base URL is tolerated (local development and
 # the in-process test client). Any other host must use https – Claude will
 # not talk OAuth to a non-TLS connector, and tokens must not cross the wire
@@ -58,6 +69,12 @@ ENV_OAUTH_AUTH_CODE_TTL = "BRAMBLE_OAUTH_AUTH_CODE_TTL"
 ENV_OAUTH_STATIC_CLIENT_ID = "BRAMBLE_OAUTH_STATIC_CLIENT_ID"
 ENV_OAUTH_STATIC_CLIENT_SECRET = "BRAMBLE_OAUTH_STATIC_CLIENT_SECRET"
 ENV_OAUTH_STATIC_CLIENT_REDIRECT_URIS = "BRAMBLE_OAUTH_STATIC_CLIENT_REDIRECT_URIS"
+ENV_OAUTH_OWNER_SECRET_FILE = "BRAMBLE_OAUTH_OWNER_SECRET_FILE"
+ENV_OAUTH_OWNER_SESSION_IDLE_SECONDS = "BRAMBLE_OAUTH_OWNER_SESSION_IDLE_SECONDS"
+ENV_OAUTH_OWNER_SESSION_ABSOLUTE_SECONDS = "BRAMBLE_OAUTH_OWNER_SESSION_ABSOLUTE_SECONDS"
+ENV_OAUTH_OWNER_LOGIN_MAX_ATTEMPTS = "BRAMBLE_OAUTH_OWNER_LOGIN_MAX_ATTEMPTS"
+ENV_OAUTH_OWNER_LOGIN_WINDOW_SECONDS = "BRAMBLE_OAUTH_OWNER_LOGIN_WINDOW_SECONDS"
+ENV_OAUTH_OWNER_COOKIE_SECURE = "BRAMBLE_OAUTH_OWNER_COOKIE_SECURE"
 
 _TRUE_TOKENS: frozenset[str] = frozenset({"1", "true", "yes", "on"})
 _FALSE_TOKENS: frozenset[str] = frozenset({"0", "false", "no", "off"})
@@ -116,6 +133,12 @@ class OAuthConfig:
     static_client_id: str | None = None
     static_client_secret: str | None = None
     static_client_redirect_uris: tuple[str, ...] = field(default_factory=tuple)
+    owner_secret_file: Path = _DEFAULT_OWNER_SECRET_FILE
+    owner_session_idle_seconds: int = _DEFAULT_OWNER_SESSION_IDLE_SECONDS
+    owner_session_absolute_seconds: int = _DEFAULT_OWNER_SESSION_ABSOLUTE_SECONDS
+    owner_login_max_attempts: int = _DEFAULT_OWNER_LOGIN_MAX_ATTEMPTS
+    owner_login_window_seconds: int = _DEFAULT_OWNER_LOGIN_WINDOW_SECONDS
+    owner_cookie_secure: bool = _DEFAULT_OWNER_COOKIE_SECURE
 
     def __post_init__(self) -> None:
         self._validate_public_base_url()
@@ -124,6 +147,7 @@ class OAuthConfig:
         self._validate_enable_dcr()
         self._validate_ttls()
         self._validate_static_client()
+        self._validate_owner_gate()
 
     # ------------------------------------------------------------------
     # Derived accessors
@@ -240,6 +264,26 @@ class OAuthConfig:
         for uri in self.static_client_redirect_uris:
             self._validate_redirect_uri(uri)
 
+    def _validate_owner_gate(self) -> None:
+        if not isinstance(self.owner_secret_file, Path):
+            raise TypeError("owner_secret_file must be a pathlib.Path")
+        if not isinstance(self.owner_cookie_secure, bool):
+            raise TypeError("owner_cookie_secure must be a bool")
+        for name, value in (
+            ("owner_session_idle_seconds", self.owner_session_idle_seconds),
+            ("owner_session_absolute_seconds", self.owner_session_absolute_seconds),
+            ("owner_login_max_attempts", self.owner_login_max_attempts),
+            ("owner_login_window_seconds", self.owner_login_window_seconds),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"{name} must be an int")
+            if value <= 0:
+                raise ValueError(f"{name} must be positive")
+        if self.owner_session_absolute_seconds < self.owner_session_idle_seconds:
+            raise ValueError(
+                "owner_session_absolute_seconds must be >= owner_session_idle_seconds"
+            )
+
     @staticmethod
     def _validate_redirect_uri(uri: str) -> None:
         if not isinstance(uri, str) or not uri.strip():
@@ -315,6 +359,13 @@ class OAuthConfig:
             _parse_list(environ.get(ENV_OAUTH_STATIC_CLIENT_REDIRECT_URIS))
         )
 
+        owner_secret_value = environ.get(ENV_OAUTH_OWNER_SECRET_FILE)
+        owner_secret_file = (
+            Path(owner_secret_value)
+            if owner_secret_value
+            else _DEFAULT_OWNER_SECRET_FILE
+        )
+
         return cls(
             public_base_url=public_base_url.strip(),
             oauth_db_path=oauth_db_path,
@@ -326,6 +377,32 @@ class OAuthConfig:
             static_client_id=static_client_id,
             static_client_secret=static_client_secret,
             static_client_redirect_uris=static_client_redirect_uris,
+            owner_secret_file=owner_secret_file,
+            owner_session_idle_seconds=_parse_int(
+                environ.get(ENV_OAUTH_OWNER_SESSION_IDLE_SECONDS),
+                default=_DEFAULT_OWNER_SESSION_IDLE_SECONDS,
+                field_name="owner_session_idle_seconds",
+            ),
+            owner_session_absolute_seconds=_parse_int(
+                environ.get(ENV_OAUTH_OWNER_SESSION_ABSOLUTE_SECONDS),
+                default=_DEFAULT_OWNER_SESSION_ABSOLUTE_SECONDS,
+                field_name="owner_session_absolute_seconds",
+            ),
+            owner_login_max_attempts=_parse_int(
+                environ.get(ENV_OAUTH_OWNER_LOGIN_MAX_ATTEMPTS),
+                default=_DEFAULT_OWNER_LOGIN_MAX_ATTEMPTS,
+                field_name="owner_login_max_attempts",
+            ),
+            owner_login_window_seconds=_parse_int(
+                environ.get(ENV_OAUTH_OWNER_LOGIN_WINDOW_SECONDS),
+                default=_DEFAULT_OWNER_LOGIN_WINDOW_SECONDS,
+                field_name="owner_login_window_seconds",
+            ),
+            owner_cookie_secure=_parse_bool(
+                environ.get(ENV_OAUTH_OWNER_COOKIE_SECURE),
+                default=_DEFAULT_OWNER_COOKIE_SECURE,
+                field_name="owner_cookie_secure",
+            ),
         )
 
 

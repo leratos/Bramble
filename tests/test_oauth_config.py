@@ -12,6 +12,9 @@ from bramble.oauth_config import (
     ENV_OAUTH_AUTH_CODE_TTL,
     ENV_OAUTH_DB_PATH,
     ENV_OAUTH_ENABLE_DCR,
+    ENV_OAUTH_OWNER_COOKIE_SECURE,
+    ENV_OAUTH_OWNER_SECRET_FILE,
+    ENV_OAUTH_OWNER_SESSION_IDLE_SECONDS,
     ENV_OAUTH_PUBLIC_BASE_URL,
     ENV_OAUTH_REFRESH_TOKEN_TTL,
     ENV_OAUTH_SCOPES,
@@ -266,3 +269,45 @@ class TestFromEnv:
             }
         )
         assert cfg.refresh_token_ttl is None
+
+
+# ---------------------------------------------------------------------------
+# Owner-gate (Phase 6.6) config
+# ---------------------------------------------------------------------------
+class TestOwnerGate:
+    def test_defaults(self) -> None:
+        cfg = OAuthConfig(public_base_url=_BASE)
+        assert cfg.owner_secret_file == Path("./secrets/oauth-owner.json")
+        assert cfg.owner_session_idle_seconds == 900
+        assert cfg.owner_session_absolute_seconds == 28_800
+        assert cfg.owner_login_max_attempts == 5
+        assert cfg.owner_cookie_secure is True
+
+    def test_absolute_must_be_at_least_idle(self) -> None:
+        with pytest.raises(ValueError, match="absolute"):
+            OAuthConfig(
+                public_base_url=_BASE,
+                owner_session_idle_seconds=1000,
+                owner_session_absolute_seconds=500,
+            )
+
+    def test_cookie_secure_must_be_bool(self) -> None:
+        with pytest.raises(TypeError):
+            OAuthConfig(public_base_url=_BASE, owner_cookie_secure="yes")  # type: ignore[arg-type]
+
+    def test_login_attempts_must_be_positive(self) -> None:
+        with pytest.raises(ValueError):
+            OAuthConfig(public_base_url=_BASE, owner_login_max_attempts=0)
+
+    def test_from_env_resolution(self) -> None:
+        cfg = OAuthConfig.from_env(
+            env={
+                ENV_OAUTH_PUBLIC_BASE_URL: _BASE,
+                ENV_OAUTH_OWNER_SECRET_FILE: "/opt/bramble/secrets/oauth-owner.json",
+                ENV_OAUTH_OWNER_SESSION_IDLE_SECONDS: "600",
+                ENV_OAUTH_OWNER_COOKIE_SECURE: "false",
+            }
+        )
+        assert cfg.owner_secret_file == Path("/opt/bramble/secrets/oauth-owner.json")
+        assert cfg.owner_session_idle_seconds == 600
+        assert cfg.owner_cookie_secure is False

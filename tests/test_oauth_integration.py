@@ -28,10 +28,12 @@ from fastmcp.server.auth.auth import MultiAuth
 from mcp.server.auth.provider import AuthorizationParams
 from mcp.shared.auth import OAuthClientInformationFull
 
+from bramble.admin_auth import hash_admin_password
 from bramble.auth_validator import AuthValidator
 from bramble.journal_db import JournalDB
 from bramble.journal_mcp_server import JournalMCPServer
 from bramble.oauth_config import OAuthConfig
+from bramble.oauth_owner_gate import build_owner_gate
 from bramble.oauth_provider import BrambleOAuthProvider
 from bramble.oauth_store import OAuthStore
 from bramble.rate_limiter import RateLimiter
@@ -164,3 +166,52 @@ class TestDiscoveryEndpoints:
         www_auth = resp.headers.get("www-authenticate", "")
         assert "resource_metadata=" in www_auth
         assert "/.well-known/oauth-protected-resource/mcp" in www_auth
+
+
+# ---------------------------------------------------------------------------
+# Owner gate composed onto the full FastMCP app (Phase 6.6)
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def gated_http_app(tmp_path: Path, db: JournalDB):
+    stack = _Stack(tmp_path)
+    owner_secret = tmp_path / "oauth-owner.json"
+    owner_secret.write_text(
+        json.dumps({"username": "owner", "password_hash": hash_admin_password("pw")}),
+        encoding="utf-8",
+    )
+    gate = build_owner_gate(
+        OAuthConfig(
+            public_base_url=_BASE,
+            owner_secret_file=owner_secret,
+            owner_cookie_secure=False,
+        )
+    )
+    server = JournalMCPServer(
+        db,
+        auth_provider=stack.multi,
+        rate_limiter=RateLimiter(per_token_rpm=60, per_ip_rpm=120),
+    )
+    return server.app.http_app(middleware=[gate])
+
+
+class TestOwnerGateComposition:
+    async def test_authorize_is_gated_by_owner_login(self, gated_http_app) -> None:
+        resp = await _get(
+            gated_http_app,
+            "/authorize?client_id=x&redirect_uri=https://claude.ai/cb"
+            "&scope=journal:read&code_challenge=abc",
+        )
+        assert resp.status_code == 200
+        assert "Sign in" in resp.text  # the login page, not a framework response
+
+    async def test_mcp_still_requires_auth_under_the_gate(self, gated_http_app) -> None:
+        resp = await _get(
+            gated_http_app, "/mcp", headers={"Accept": "text/event-stream"}
+        )
+        assert resp.status_code == 401  # passed through to the framework auth
+
+    async def test_well_known_passes_through_the_gate(self, gated_http_app) -> None:
+        resp = await _get(
+            gated_http_app, "/.well-known/oauth-authorization-server"
+        )
+        assert resp.status_code == 200

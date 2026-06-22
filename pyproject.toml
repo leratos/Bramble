@@ -50,7 +50,7 @@ Issues = "https://github.com/leratos/Bramble/issues"
 where = ["src"]
 
 [tool.setuptools.package-data]
-bramble = ["templates/admin/*.html", "static/admin/*.css"]
+bramble = ["templates/admin/*.html", "templates/oauth/*.html", "static/admin/*.css"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

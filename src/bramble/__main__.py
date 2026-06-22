@@ -61,11 +61,14 @@ def main() -> None:
         if config.enable_oauth:
             # OAuth mode: the self-hosted Authorization Server protects /mcp
             # and a static-token verifier inside the same MultiAuth keeps the
-            # legacy bearer path working (Phase-6 decision D3/D4).
+            # legacy bearer path working (Phase-6 decision D3/D4). The owner
+            # gate (Phase 6.6) authenticates the resource owner on /authorize.
+            auth_provider, http_middleware = _build_oauth_stack(config)
             server = JournalMCPServer(
                 db,
-                auth_provider=_build_oauth_auth(config),
+                auth_provider=auth_provider,
                 rate_limiter=rate_limiter,
+                http_middleware=http_middleware,
             )
             logger.info("OAuth authorization server enabled for http transport")
         else:
@@ -76,19 +79,24 @@ def main() -> None:
         server.run(transport="http", host=config.host, port=config.port)
 
 
-def _build_oauth_auth(config: ServerConfig):
-    """Build the Phase-6 ``MultiAuth`` (OAuth AS + static-token verifier).
+def _build_oauth_stack(config: ServerConfig):
+    """Build the Phase-6 OAuth auth provider and the http gate middleware.
 
-    OAuth-specific modules are imported lazily here so the much more common
-    stdio / static-http paths never pull them in. ``OAuthConfig.from_env``
-    raises if the required public base URL is missing, which is the right
-    fail-fast behaviour once OAuth has been switched on.
+    Returns ``(auth_provider, http_middleware)`` where ``auth_provider`` is a
+    ``MultiAuth`` (self-hosted AS + static-token verifier) and
+    ``http_middleware`` is the resource-owner login/consent gate on
+    ``/authorize`` (Phase 6.6). OAuth-specific modules are imported lazily so
+    the common stdio / static-http paths never pull them in.
+    ``OAuthConfig.from_env`` raises if the required public base URL is missing,
+    and the owner gate raises if the owner secret file is absent — both the
+    right fail-fast behaviour once OAuth has been switched on.
     """
 
     from fastmcp.server.auth.auth import MultiAuth
     from mcp.shared.auth import OAuthClientInformationFull
 
     from bramble.oauth_config import OAuthConfig
+    from bramble.oauth_owner_gate import build_owner_gate
     from bramble.oauth_provider import BrambleOAuthProvider
     from bramble.oauth_store import OAuthStore
     from bramble.static_token_verifier import StaticTokenVerifier
@@ -126,11 +134,13 @@ def _build_oauth_auth(config: ServerConfig):
             "has_static_client": oauth_config.has_static_client,
         },
     )
-    return MultiAuth(
+    auth_provider = MultiAuth(
         server=provider,
         verifiers=[static_verifier],
         base_url=oauth_config.public_base_url,
     )
+    owner_gate = build_owner_gate(oauth_config)
+    return auth_provider, [owner_gate]
 
 
 if __name__ == "__main__":

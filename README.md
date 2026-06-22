@@ -185,13 +185,21 @@ Enable it by setting `BRAMBLE_ENABLE_OAUTH=true` plus:
 | `BRAMBLE_OAUTH_ACCESS_TOKEN_TTL` | `3600` | seconds |
 | `BRAMBLE_OAUTH_REFRESH_TOKEN_TTL` | `2592000` | seconds; `none` for no expiry |
 | `BRAMBLE_OAUTH_AUTH_CODE_TTL` | `300` | seconds |
+| `BRAMBLE_OAUTH_OWNER_SECRET_FILE` | `./secrets/oauth-owner.json` | dedicated owner-login Argon2id secret |
 
 Tokens are opaque (no signing key) and persisted in `oauth.db`. Claude usually
 self-registers via DCR; a confidential fallback client can be provisioned with
-`scripts/gen_oauth_client.py`. nginx must pass the root well-known and
-`/authorize` `/token` `/register` `/revoke` paths through to the backend (see
-`deploy/plesk-nginx-directives.conf`). Full design and the rollout/compliance
-gate are in [`docs/concepts/phase-6-oauth-authorization-server.md`](docs/concepts/phase-6-oauth-authorization-server.md).
+`scripts/gen_oauth_client.py`.
+
+`/authorize` is gated: the resource owner must log in (a dedicated Argon2id
+secret, separate from the admin UI) and explicitly consent before a code is
+issued, so a self-registered client cannot mint a token on its own. Create the
+owner secret with `python scripts/gen_admin_secret.py --output
+secrets/oauth-owner.json --username owner`. nginx must pass the root well-known
+and `/authorize` `/oauth/login` `/oauth/consent` `/token` `/register` `/revoke`
+paths through to the backend (see `deploy/plesk-nginx-directives.conf`). Full
+design and the rollout/compliance gate are in
+[`docs/concepts/phase-6-oauth-authorization-server.md`](docs/concepts/phase-6-oauth-authorization-server.md).
 
 ### Admin UI
 
