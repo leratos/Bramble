@@ -5,12 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from fastmcp.server.auth.auth import (
-    AccessToken,
-    AuthorizationCode,
-    OAuthClientInformationFull,
-    RefreshToken,
-)
+from mcp.server.auth.provider import AccessToken, AuthorizationCode, RefreshToken
+from mcp.shared.auth import OAuthClientInformationFull
 
 from bramble.oauth_store import OAuthStore
 

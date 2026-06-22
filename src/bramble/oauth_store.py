@@ -32,12 +32,12 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastmcp.server.auth.auth import (
-    AccessToken,
-    AuthorizationCode,
-    OAuthClientInformationFull,
-    RefreshToken,
-)
+# Use the canonical MCP model classes (the ones the framework and the
+# provider pass around). FastMCP re-exports subclasses of the same names;
+# importing those here would make isinstance() reject the base-class
+# instances the provider actually hands us.
+from mcp.server.auth.provider import AccessToken, AuthorizationCode, RefreshToken
+from mcp.shared.auth import OAuthClientInformationFull
 
 logger = logging.getLogger(__name__)
 
