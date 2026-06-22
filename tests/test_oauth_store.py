@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -90,6 +91,15 @@ class TestLifecycle:
     def test_db_path_rejects_bad_type(self) -> None:
         with pytest.raises(TypeError):
             OAuthStore(123)  # type: ignore[arg-type]
+
+    @pytest.mark.skipif(
+        os.name == "nt", reason="POSIX owner-only mode bits are not reliable on Windows"
+    )
+    def test_initialize_restricts_db_permissions(self, tmp_path: Path) -> None:
+        # oauth.db holds live tokens + client secrets -> owner-only.
+        s = OAuthStore(tmp_path / "oauth.db")
+        s.initialize()
+        assert (s.db_path.stat().st_mode & 0o777) == 0o600
 
 
 # ---------------------------------------------------------------------------

@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -132,6 +132,18 @@ class OAuthStore:
             for statement in _SCHEMA_STATEMENTS:
                 conn.execute(statement)
             conn.commit()
+        # This store holds access/refresh tokens and client secrets in clear,
+        # so keep the DB (and its WAL/SHM sidecars, where present) owner-only:
+        # a local user must not be able to copy live credentials. chmod is a
+        # no-op concept on Windows dev boxes, hence the broad except.
+        self._restrict_permissions()
+
+    def _restrict_permissions(self) -> None:
+        for suffix in ("", "-wal", "-shm"):
+            sidecar = Path(f"{self._db_path}{suffix}")
+            with suppress(OSError):
+                if sidecar.exists():
+                    sidecar.chmod(0o600)
 
     # ------------------------------------------------------------------
     # Clients (RFC 7591 dynamic registration + static fallback)

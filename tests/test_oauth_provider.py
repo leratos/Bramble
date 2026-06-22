@@ -179,6 +179,28 @@ class TestAuthorize:
         assert stored is not None
         assert stored.scopes == ["journal:read"]
 
+    async def test_omitted_scope_defaults_to_client_scope(
+        self, tmp_path: Path
+    ) -> None:
+        # A request without a scope parameter must still yield a usable token,
+        # not an empty-scope one the resource would reject.
+        provider, store, _ = _make_provider(tmp_path)
+        client = _client()
+        await provider.register_client(client)
+        params = AuthorizationParams(
+            state="s",
+            scopes=None,
+            code_challenge="c",
+            redirect_uri=_REDIRECT,
+            redirect_uri_provided_explicitly=True,
+            resource=None,
+        )
+        redirect = await provider.authorize(client, params)
+        code = parse_qs(urlparse(redirect).query)["code"][0]
+        stored = store.get_auth_code(code)
+        assert stored is not None
+        assert stored.scopes == ["journal:read"]
+
 
 # ---------------------------------------------------------------------------
 # Full authorization-code flow
@@ -315,6 +337,18 @@ class TestRefreshFlow:
         token = await self._issue(provider, client)
         clock.advance(1001)
         assert await provider.load_refresh_token(client, token.refresh_token) is None
+
+    async def test_refresh_is_single_use(self, tmp_path: Path) -> None:
+        # Re-using a consumed refresh token must fail rather than mint a second
+        # pair (concurrent-rotation guard via the atomic consume).
+        provider, _, _ = _make_provider(tmp_path)
+        client = _client()
+        token = await self._issue(provider, client)
+        refresh_obj = await provider.load_refresh_token(client, token.refresh_token)
+        assert refresh_obj is not None
+        await provider.exchange_refresh_token(client, refresh_obj, ["journal:read"])
+        with pytest.raises(TokenError):
+            await provider.exchange_refresh_token(client, refresh_obj, ["journal:read"])
 
 
 # ---------------------------------------------------------------------------

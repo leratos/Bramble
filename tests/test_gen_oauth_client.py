@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 
 import pytest
@@ -123,3 +124,18 @@ class TestGenOAuthClient:
         rc = gen.main(["--redirect-uri", _CB, "--write", str(target)])
         assert rc == 0
         assert f"{ENV_OAUTH_STATIC_CLIENT_ID}=" in target.read_text(encoding="utf-8")
+
+    @pytest.mark.skipif(
+        os.name == "nt", reason="POSIX owner-only mode bits are not reliable on Windows"
+    )
+    def test_write_tightens_existing_insecure_file(self, gen, tmp_path: Path) -> None:
+        # An existing group/world-readable file must be tightened to 600 so the
+        # fresh secret is not written into an insecure file.
+        target = tmp_path / "oauth.env"
+        target.write_text("stale", encoding="utf-8")
+        target.chmod(0o644)
+        rc = gen.main(
+            ["--redirect-uri", _CB, "--public-base-url", _BASE, "--write", str(target)]
+        )
+        assert rc == 0
+        assert (target.stat().st_mode & 0o777) == 0o600

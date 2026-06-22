@@ -448,16 +448,27 @@ class _PrincipalRateLimitMiddleware(Middleware):
         if not self._rate_limiter.allow_project(principal_key):
             raise ToolError("rate limit exceeded; slow down")
 
-        scopes = set(getattr(principal, "scopes", None) or ())
-        if tool_name in _WRITE_TOOLS and _WRITE_SCOPE not in scopes:
-            raise ToolError(
-                f"this token is read-only; {tool_name} requires write access"
-            )
-
+        # Derive the project binding first: only a static principal
+        # ("static:<project>") carries one; OAuth principals get None.
         client_id = getattr(principal, "client_id", None) or ""
-        if client_id.startswith(STATIC_CLIENT_PREFIX):
-            return client_id[len(STATIC_CLIENT_PREFIX) :]
-        return None
+        project = (
+            client_id[len(STATIC_CLIENT_PREFIX) :]
+            if client_id.startswith(STATIC_CLIENT_PREFIX)
+            else None
+        )
+
+        # A write tool requires BOTH the journal:write scope AND a project
+        # binding. Requiring the binding closes a hole: if an operator adds
+        # journal:write to BRAMBLE_OAUTH_SCOPES, an OAuth principal would have
+        # the scope but project=None, and _enforce_project_scope treats None as
+        # unrestricted – letting it write to any project. No project => no write.
+        scopes = set(getattr(principal, "scopes", None) or ())
+        if tool_name in _WRITE_TOOLS and (_WRITE_SCOPE not in scopes or project is None):
+            raise ToolError(
+                f"this token is read-only; {tool_name} requires write access "
+                "bound to a project"
+            )
+        return project
 
 
 class JournalMCPServer:

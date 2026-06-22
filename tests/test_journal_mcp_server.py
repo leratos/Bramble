@@ -1480,6 +1480,20 @@ class TestPrincipalAuthorize:
         with pytest.raises(ToolError, match="rate limit"):
             mw._authorize(principal=p, client_ip="1.1.1.2", tool_name="journal_read")
 
+    def test_oauth_principal_with_write_scope_but_no_binding_is_blocked(
+        self, rate_limiter: RateLimiter
+    ) -> None:
+        # Misconfig hardening: even if an OAuth principal carries journal:write
+        # (operator added it to the OAuth scopes), it has no project binding and
+        # must NOT be allowed to write to any project.
+        mw = self._mw(rate_limiter)
+        with pytest.raises(ToolError, match="read-only"):
+            mw._authorize(
+                principal=_principal("dcr-xyz", ["journal:read", "journal:write"]),
+                client_ip="1.2.3.4",
+                tool_name="journal_append",
+            )
+
 
 class TestProjectScope:
     def test_no_binding_when_context_unset(self) -> None:

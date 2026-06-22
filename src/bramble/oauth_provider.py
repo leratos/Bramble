@@ -144,8 +144,17 @@ class BrambleOAuthProvider(OAuthProvider):
                 error="invalid_client", error_description="Client ID is required"
             )
 
-        # Narrow requested scopes to those the client is registered for.
-        scopes_list = list(params.scopes) if params.scopes is not None else []
+        # Narrow requested scopes to those the client is registered for. When
+        # the request omits scope entirely (params.scopes is None), fall back
+        # to the client's registered scope (else the configured default) –
+        # an empty-scope token would be rejected by the resource and the
+        # client could authorize but call nothing.
+        if params.scopes is not None:
+            scopes_list = list(params.scopes)
+        elif client.scope:
+            scopes_list = client.scope.split()
+        else:
+            scopes_list = list(self._config.scopes)
         if client.scope:
             allowed = set(client.scope.split())
             scopes_list = [s for s in scopes_list if s in allowed]
@@ -227,8 +236,23 @@ class BrambleOAuthProvider(OAuthProvider):
             )
         if client.client_id is None:
             raise TokenError("invalid_client", "Client ID is required")
-        # Rotate: invalidate the presented refresh token and its access token.
-        await self._revoke_refresh(refresh_token.token)
+        # Rotate atomically: consume the presented refresh token with a delete
+        # that reports whether a row went. If it did not, the token was already
+        # used (or a concurrent refresh rotated it), so the grant is invalid –
+        # this stops two concurrent /token refreshes from both minting a new
+        # pair from one refresh token. Mirrors the single-use auth-code consume.
+        paired_access = await asyncio.to_thread(
+            self._store.get_paired_access_token, refresh_token.token
+        )
+        consumed = await asyncio.to_thread(
+            self._store.delete_refresh_token, refresh_token.token
+        )
+        if not consumed:
+            raise TokenError(
+                "invalid_grant", "Refresh token not found or already used."
+            )
+        if paired_access:
+            await asyncio.to_thread(self._store.delete_access_token, paired_access)
         granted = scopes if scopes else list(refresh_token.scopes)
         return await self._issue_token_pair(client.client_id, granted)
 

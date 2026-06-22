@@ -247,3 +247,22 @@ class TestFromEnv:
             }
         )
         assert cfg.has_static_client is False
+
+    def test_zero_refresh_ttl_is_rejected_not_silently_infinite(self) -> None:
+        # REFRESH_TOKEN_TTL=0 must fail validation, never mean "no expiry".
+        with pytest.raises(ValueError, match="refresh_token_ttl"):
+            OAuthConfig.from_env(
+                env={
+                    ENV_OAUTH_PUBLIC_BASE_URL: _BASE,
+                    ENV_OAUTH_REFRESH_TOKEN_TTL: "0",
+                }
+            )
+
+    def test_none_refresh_ttl_still_means_no_expiry(self) -> None:
+        cfg = OAuthConfig.from_env(
+            env={
+                ENV_OAUTH_PUBLIC_BASE_URL: _BASE,
+                ENV_OAUTH_REFRESH_TOKEN_TTL: "none",
+            }
+        )
+        assert cfg.refresh_token_ttl is None

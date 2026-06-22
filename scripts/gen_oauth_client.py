@@ -34,6 +34,7 @@ Exit codes
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import secrets
 import stat
@@ -121,7 +122,14 @@ def write_env_file(path: Path, content: str) -> None:
     """Write ``content`` to ``path`` with owner-only (600) permissions."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.S_IRUSR | stat.S_IWUSR)
+    owner_only = stat.S_IRUSR | stat.S_IWUSR
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, owner_only)
+    # The mode argument to os.open only applies when the file is CREATED. If the
+    # target already existed (group/world-readable), tighten it explicitly so a
+    # fresh secret is never written into an insecure file.
+    if hasattr(os, "fchmod"):
+        with contextlib.suppress(OSError):
+            os.fchmod(fd, owner_only)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(content + "\n")
 

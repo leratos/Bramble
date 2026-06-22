@@ -61,7 +61,10 @@ ENV_OAUTH_STATIC_CLIENT_REDIRECT_URIS = "BRAMBLE_OAUTH_STATIC_CLIENT_REDIRECT_UR
 
 _TRUE_TOKENS: frozenset[str] = frozenset({"1", "true", "yes", "on"})
 _FALSE_TOKENS: frozenset[str] = frozenset({"0", "false", "no", "off"})
-_NONE_TOKENS: frozenset[str] = frozenset({"", "none", "never", "0"})
+# Only explicit words mean "no expiry". Deliberately NOT "0"/"" – an operator
+# setting REFRESH_TOKEN_TTL=0 intends a (rejected) zero TTL, not the longest
+# possible lifetime, so 0 must fall through to int() and fail validation.
+_NONE_TOKENS: frozenset[str] = frozenset({"none", "never"})
 
 
 @dataclass(frozen=True, slots=True)
