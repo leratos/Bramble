@@ -32,60 +32,94 @@ def gen():
     return _load_module()
 
 
-class TestGenOAuthClient:
-    def test_prints_env_block(self, gen, capsys: pytest.CaptureFixture[str]) -> None:
-        rc = gen.main(
-            ["--redirect-uri", _CB, "--public-base-url", _BASE]
-        )
-        assert rc == 0
-        out = capsys.readouterr().out
-        assert f"{ENV_OAUTH_STATIC_CLIENT_ID}=" in out
-        assert f"{ENV_OAUTH_STATIC_CLIENT_SECRET}=" in out
-        assert f"{ENV_OAUTH_STATIC_CLIENT_REDIRECT_URIS}={_CB}" in out
+def _secret_from_file(path: Path) -> str:
+    prefix = f"{ENV_OAUTH_STATIC_CLIENT_SECRET}="
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix) :]
+    raise AssertionError("no secret line in env file")
 
-    def test_custom_client_id_respected(
+
+class TestGenOAuthClient:
+    def test_requires_write_so_secret_is_not_printed(
         self, gen, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        gen.main(
-            ["--redirect-uri", _CB, "--public-base-url", _BASE, "--client-id", "my-id"]
-        )
-        out = capsys.readouterr().out
-        assert f"{ENV_OAUTH_STATIC_CLIENT_ID}=my-id" in out
-
-    def test_rejects_plain_http_redirect(self, gen) -> None:
-        rc = gen.main(
-            ["--redirect-uri", "http://claude.ai/cb", "--public-base-url", _BASE]
-        )
+        # Without --write the script refuses rather than echo the secret.
+        rc = gen.main(["--redirect-uri", _CB, "--public-base-url", _BASE])
         assert rc == 2
+        captured = capsys.readouterr()
+        assert ENV_OAUTH_STATIC_CLIENT_SECRET not in captured.out
 
-    def test_requires_public_base_url(
-        self, gen, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delenv(ENV_OAUTH_PUBLIC_BASE_URL, raising=False)
-        rc = gen.main(["--redirect-uri", _CB])
-        assert rc == 2
-
-    def test_write_creates_file(self, gen, tmp_path: Path) -> None:
+    def test_write_creates_file_with_env_block(self, gen, tmp_path: Path) -> None:
         target = tmp_path / "secrets" / "oauth.env"
         rc = gen.main(
+            ["--redirect-uri", _CB, "--public-base-url", _BASE, "--write", str(target)]
+        )
+        assert rc == 0
+        content = target.read_text(encoding="utf-8")
+        assert f"{ENV_OAUTH_STATIC_CLIENT_ID}=" in content
+        assert f"{ENV_OAUTH_STATIC_CLIENT_SECRET}=" in content
+        assert f"{ENV_OAUTH_STATIC_CLIENT_REDIRECT_URIS}={_CB}" in content
+
+    def test_secret_is_never_written_to_stdout_or_stderr(
+        self, gen, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        target = tmp_path / "oauth.env"
+        rc = gen.main(
+            ["--redirect-uri", _CB, "--public-base-url", _BASE, "--write", str(target)]
+        )
+        assert rc == 0
+        secret = _secret_from_file(target)
+        captured = capsys.readouterr()
+        assert secret not in captured.out
+        assert secret not in captured.err
+
+    def test_custom_client_id_respected(
+        self, gen, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        target = tmp_path / "oauth.env"
+        gen.main(
             [
                 "--redirect-uri",
                 _CB,
                 "--public-base-url",
                 _BASE,
+                "--client-id",
+                "my-id",
                 "--write",
                 str(target),
             ]
         )
-        assert rc == 0
-        content = target.read_text(encoding="utf-8")
-        assert f"{ENV_OAUTH_STATIC_CLIENT_SECRET}=" in content
-        assert _CB in content
+        assert f"{ENV_OAUTH_STATIC_CLIENT_ID}=my-id" in target.read_text(
+            encoding="utf-8"
+        )
+        assert "my-id" in capsys.readouterr().out  # client_id is not secret
+
+    def test_rejects_plain_http_redirect(self, gen, tmp_path: Path) -> None:
+        rc = gen.main(
+            [
+                "--redirect-uri",
+                "http://claude.ai/cb",
+                "--public-base-url",
+                _BASE,
+                "--write",
+                str(tmp_path / "oauth.env"),
+            ]
+        )
+        assert rc == 2
+
+    def test_requires_public_base_url(
+        self, gen, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.delenv(ENV_OAUTH_PUBLIC_BASE_URL, raising=False)
+        rc = gen.main(["--redirect-uri", _CB, "--write", str(tmp_path / "oauth.env")])
+        assert rc == 2
 
     def test_reads_base_url_from_env(
-        self, gen, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+        self, gen, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         monkeypatch.setenv(ENV_OAUTH_PUBLIC_BASE_URL, _BASE)
-        rc = gen.main(["--redirect-uri", _CB])
+        target = tmp_path / "oauth.env"
+        rc = gen.main(["--redirect-uri", _CB, "--write", str(target)])
         assert rc == 0
-        assert f"{ENV_OAUTH_STATIC_CLIENT_ID}=" in capsys.readouterr().out
+        assert f"{ENV_OAUTH_STATIC_CLIENT_ID}=" in target.read_text(encoding="utf-8")

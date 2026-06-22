@@ -15,14 +15,15 @@ Usage
 -----
 
     python scripts/gen_oauth_client.py \
-        --redirect-uri https://claude.ai/api/mcp/auth_callback
-    python scripts/gen_oauth_client.py \
         --redirect-uri https://claude.ai/api/mcp/auth_callback \
         --write /opt/bramble/secrets/oauth.env
 
-The client_secret is generated fresh and shown once. The public base URL is
-resolved from ``--public-base-url`` > ``BRAMBLE_OAUTH_PUBLIC_BASE_URL`` and is
-used only to validate the configuration (https-for-non-local etc.).
+The client_secret is generated fresh and written **only** to the mode-600 env
+file; it is never printed to stdout (stdout lands in shell history / CI logs),
+so ``--write`` is required. Read the secret back with ``cat`` to paste it into
+the Claude connector. The public base URL is resolved from
+``--public-base-url`` > ``BRAMBLE_OAUTH_PUBLIC_BASE_URL`` and is used only to
+validate the configuration (https-for-non-local etc.).
 
 Exit codes
 ----------
@@ -157,17 +158,28 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     env_block = render_env_block(client_id, client_secret, redirect_uris)
-    if args.write is not None:
-        write_env_file(args.write, env_block)
-        print(f"wrote static client config to {args.write} (mode 600)")
-        print(f"  client_id:     {client_id}")
-        print(f"  client_secret: {client_secret}   (shown once)")
-    else:
-        print(env_block)
 
+    # The client secret must never be echoed to stdout: stdout lands in shell
+    # history, terminal scrollback and CI logs. It is written only to the
+    # mode-600 env file, so --write is required. (Mirrors gen_admin_secret.py,
+    # which writes the secret to a file rather than printing it.)
+    if args.write is None:
+        print(
+            "error: refusing to print the client secret to stdout; pass "
+            "--write PATH to write it to a mode-600 env file",
+            file=sys.stderr,
+        )
+        return 2
+
+    write_env_file(args.write, env_block)
+    print(f"wrote static client config to {args.write} (mode 600)")
+    print(f"  client_id:     {client_id}")
+    print(f"  redirect_uris: {' '.join(redirect_uris)}")
+    print(f"  client_secret: written to {args.write} - 'cat' it to read it")
     print(
-        "\nNext: place these in the service env file, restart bramble, and "
-        "paste the client_id + client_secret into the Claude connector.",
+        "\nNext: have the service load this env file (EnvironmentFile), restart "
+        "bramble (seeds the client into oauth.db), then read the secret from "
+        "the file and paste client_id + secret into the Claude connector.",
         file=sys.stderr,
     )
     return 0
