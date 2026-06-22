@@ -161,9 +161,37 @@ Priority: CLI argument > environment variable > default.
 | `--tokens-file PATH` | `BRAMBLE_TOKENS_FILE` | `./secrets/tokens.json` |
 | `--rate-limit-per-token N` | `BRAMBLE_RATE_LIMIT_PER_TOKEN` | `60` |
 | `--rate-limit-per-ip N` | `BRAMBLE_RATE_LIMIT_PER_IP` | `120` |
+| `--enable-oauth` | `BRAMBLE_ENABLE_OAUTH` | `false` |
 
 Logs are written as JSON to stderr (stdout is reserved for the MCP protocol
 on the stdio transport).
+
+### OAuth 2.1 connector (Phase 6)
+
+Claude Web/Mobile custom connectors only speak OAuth, so the HTTP transport
+can optionally run a self-hosted OAuth 2.1 Authorization Server in front of
+`/mcp`. It is **off by default**; enabling it does not change the existing
+static-bearer path, which keeps working through the same endpoint (both are
+accepted via `MultiAuth`). The OAuth path is read-only (scope `journal:read`).
+
+Enable it by setting `BRAMBLE_ENABLE_OAUTH=true` plus:
+
+| Env | Default | Notes |
+| --- | --- | --- |
+| `BRAMBLE_OAUTH_PUBLIC_BASE_URL` | – (required) | e.g. `https://journal.last-strawberry.com` |
+| `BRAMBLE_OAUTH_DB_PATH` | `./data/oauth.db` | mutable token store, separate from `bramble.db` |
+| `BRAMBLE_OAUTH_SCOPES` | `journal:read` | advertised/grantable scopes |
+| `BRAMBLE_OAUTH_ENABLE_DCR` | `true` | RFC 7591 dynamic client registration |
+| `BRAMBLE_OAUTH_ACCESS_TOKEN_TTL` | `3600` | seconds |
+| `BRAMBLE_OAUTH_REFRESH_TOKEN_TTL` | `2592000` | seconds; `none` for no expiry |
+| `BRAMBLE_OAUTH_AUTH_CODE_TTL` | `300` | seconds |
+
+Tokens are opaque (no signing key) and persisted in `oauth.db`. Claude usually
+self-registers via DCR; a confidential fallback client can be provisioned with
+`scripts/gen_oauth_client.py`. nginx must pass the root well-known and
+`/authorize` `/token` `/register` `/revoke` paths through to the backend (see
+`deploy/plesk-nginx-directives.conf`). Full design and the rollout/compliance
+gate are in [`docs/concepts/phase-6-oauth-authorization-server.md`](docs/concepts/phase-6-oauth-authorization-server.md).
 
 ### Admin UI
 

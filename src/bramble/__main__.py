@@ -86,6 +86,7 @@ def _build_oauth_auth(config: ServerConfig):
     """
 
     from fastmcp.server.auth.auth import MultiAuth
+    from mcp.shared.auth import OAuthClientInformationFull
 
     from bramble.oauth_config import OAuthConfig
     from bramble.oauth_provider import BrambleOAuthProvider
@@ -95,6 +96,25 @@ def _build_oauth_auth(config: ServerConfig):
     oauth_config = OAuthConfig.from_env()
     store = OAuthStore(oauth_config.oauth_db_path)
     store.initialize()
+
+    # Seed the optional confidential static fallback client (declared in the
+    # secrets env file) so it survives a recreated oauth.db. Idempotent upsert;
+    # only runs when a static client is configured (DCR-only otherwise).
+    if oauth_config.has_static_client:
+        store.save_client(
+            OAuthClientInformationFull(
+                client_id=oauth_config.static_client_id,
+                client_secret=oauth_config.static_client_secret,
+                redirect_uris=list(oauth_config.static_client_redirect_uris),
+                scope=" ".join(oauth_config.scopes),
+                grant_types=["authorization_code", "refresh_token"],
+                token_endpoint_auth_method="client_secret_post",
+            )
+        )
+        logger.info(
+            "seeded static oauth client", extra={"client_id": oauth_config.static_client_id}
+        )
+
     provider = BrambleOAuthProvider(store=store, config=oauth_config)
     static_verifier = StaticTokenVerifier(AuthValidator(config.tokens_file))
     logger.info(
