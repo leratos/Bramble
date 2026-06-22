@@ -9,6 +9,7 @@ import pytest
 
 from bramble.server_config import (
     ENV_DB_PATH,
+    ENV_ENABLE_OAUTH,
     ENV_HOST,
     ENV_LOG_LEVEL,
     ENV_PORT,
@@ -81,6 +82,17 @@ class TestServerConfigConstruction:
         assert cfg.tokens_file == Path("./secrets/tokens.json")
         assert cfg.rate_limit_per_token == 60
         assert cfg.rate_limit_per_ip == 120
+
+    def test_enable_oauth_defaults_off(self) -> None:
+        # The Phase-6 master switch must default off so the http path is
+        # unchanged unless explicitly enabled.
+        cfg = ServerConfig(**self._valid_kwargs())
+        assert cfg.enable_oauth is False
+
+    def test_enable_oauth_rejects_non_bool(self) -> None:
+        kwargs = self._valid_kwargs() | {"enable_oauth": "yes"}
+        with pytest.raises(TypeError):
+            ServerConfig(**kwargs)
 
     def test_tokens_file_must_be_path(self) -> None:
         kwargs = self._valid_kwargs() | {"tokens_file": "./secrets/tokens.json"}
@@ -208,3 +220,31 @@ class TestFromSources:
     def test_invalid_transport_via_env_caught_by_validation(self) -> None:
         with pytest.raises(ValueError, match="transport"):
             ServerConfig.from_sources(argv=[], env={ENV_TRANSPORT: "websocket"})
+
+    def test_enable_oauth_defaults_off_from_sources(self) -> None:
+        cfg = ServerConfig.from_sources(argv=[], env={})
+        assert cfg.enable_oauth is False
+
+    @pytest.mark.parametrize("truthy", ["1", "true", "TRUE", "yes", "on"])
+    def test_enable_oauth_env_truthy(self, truthy: str) -> None:
+        cfg = ServerConfig.from_sources(argv=[], env={ENV_ENABLE_OAUTH: truthy})
+        assert cfg.enable_oauth is True
+
+    @pytest.mark.parametrize("falsy", ["0", "false", "No", "off"])
+    def test_enable_oauth_env_falsy(self, falsy: str) -> None:
+        cfg = ServerConfig.from_sources(argv=[], env={ENV_ENABLE_OAUTH: falsy})
+        assert cfg.enable_oauth is False
+
+    def test_enable_oauth_env_invalid_raises(self) -> None:
+        with pytest.raises(ValueError, match="enable_oauth"):
+            ServerConfig.from_sources(argv=[], env={ENV_ENABLE_OAUTH: "maybe"})
+
+    def test_enable_oauth_cli_sets_true(self) -> None:
+        cfg = ServerConfig.from_sources(argv=["--enable-oauth"], env={})
+        assert cfg.enable_oauth is True
+
+    def test_enable_oauth_cli_overrides_falsy_env(self) -> None:
+        cfg = ServerConfig.from_sources(
+            argv=["--enable-oauth"], env={ENV_ENABLE_OAUTH: "false"}
+        )
+        assert cfg.enable_oauth is True

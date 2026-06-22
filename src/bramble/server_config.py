@@ -38,6 +38,14 @@ _DEFAULT_TOKENS_FILE = Path("./secrets/tokens.json")
 _DEFAULT_RATE_LIMIT_PER_TOKEN = 60
 _DEFAULT_RATE_LIMIT_PER_IP = 120
 
+# Phase-6 master switch. The self-hosted OAuth 2.1 Authorization Server is
+# off by default; turning it on is what makes ``__main__`` build the
+# OAuth provider + static-token verifier and hand them to FastMCP. With it
+# off the ``http`` transport behaves exactly as in Phase 3 (static bearer
+# only), so the existing local bearer path cannot regress. The detailed
+# OAuth knobs live in :class:`bramble.oauth_config.OAuthConfig`.
+_DEFAULT_ENABLE_OAUTH = False
+
 _VALID_TRANSPORTS: frozenset[str] = frozenset({"stdio", "http"})
 _VALID_LOG_LEVELS: frozenset[str] = frozenset(
     {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
@@ -54,6 +62,7 @@ ENV_LOG_LEVEL = "BRAMBLE_LOG_LEVEL"
 ENV_TOKENS_FILE = "BRAMBLE_TOKENS_FILE"
 ENV_RATE_LIMIT_PER_TOKEN = "BRAMBLE_RATE_LIMIT_PER_TOKEN"
 ENV_RATE_LIMIT_PER_IP = "BRAMBLE_RATE_LIMIT_PER_IP"
+ENV_ENABLE_OAUTH = "BRAMBLE_ENABLE_OAUTH"
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +96,13 @@ class ServerConfig:
     rate_limit_per_ip:
         Allowed requests per minute for a single client IP – the
         backstop applied before a token is known.
+    enable_oauth:
+        Master switch for the Phase-6 self-hosted OAuth 2.1 Authorization
+        Server. ``False`` (default) keeps the ``http`` transport on the
+        Phase-3 static-bearer path unchanged; ``True`` makes ``__main__``
+        wire the OAuth provider + static-token verifier. Only consulted
+        for the ``http`` transport. The OAuth-specific knobs live in
+        :class:`bramble.oauth_config.OAuthConfig`.
     """
 
     db_path: Path
@@ -97,6 +113,7 @@ class ServerConfig:
     tokens_file: Path = _DEFAULT_TOKENS_FILE
     rate_limit_per_token: int = _DEFAULT_RATE_LIMIT_PER_TOKEN
     rate_limit_per_ip: int = _DEFAULT_RATE_LIMIT_PER_IP
+    enable_oauth: bool = _DEFAULT_ENABLE_OAUTH
 
     def __post_init__(self) -> None:
         self._validate_db_path()
@@ -106,6 +123,7 @@ class ServerConfig:
         self._validate_log_level()
         self._validate_tokens_file()
         self._validate_rate_limits()
+        self._validate_enable_oauth()
 
     # ------------------------------------------------------------------
     # Validation helpers
@@ -159,6 +177,10 @@ class ServerConfig:
                 raise TypeError(f"{name} must be an int")
             if value <= 0:
                 raise ValueError(f"{name} must be positive")
+
+    def _validate_enable_oauth(self) -> None:
+        if not isinstance(self.enable_oauth, bool):
+            raise TypeError("enable_oauth must be a bool")
 
     # ------------------------------------------------------------------
     # Factory
@@ -225,6 +247,12 @@ class ServerConfig:
             default=_DEFAULT_RATE_LIMIT_PER_IP,
             field_name="rate_limit_per_ip",
         )
+        enable_oauth = _resolve_bool(
+            cli=ns.enable_oauth,
+            env_value=environ.get(ENV_ENABLE_OAUTH),
+            default=_DEFAULT_ENABLE_OAUTH,
+            field_name="enable_oauth",
+        )
 
         return cls(
             db_path=db_path,
@@ -235,6 +263,7 @@ class ServerConfig:
             tokens_file=tokens_file,
             rate_limit_per_token=rate_limit_per_token,
             rate_limit_per_ip=rate_limit_per_ip,
+            enable_oauth=enable_oauth,
         )
 
 
@@ -295,6 +324,21 @@ def _build_parser() -> argparse.ArgumentParser:
             f"(env: {ENV_RATE_LIMIT_PER_IP})."
         ),
     )
+    # store_const with default None keeps the CLI > env > default
+    # precedence: an absent flag is None ("not set"), present is True.
+    # There is intentionally no CLI way to force False – use the env var
+    # (BRAMBLE_ENABLE_OAUTH=false) or the built-in default for that.
+    parser.add_argument(
+        "--enable-oauth",
+        dest="enable_oauth",
+        action="store_const",
+        const=True,
+        default=None,
+        help=(
+            "Enable the self-hosted OAuth 2.1 Authorization Server on the "
+            f"http transport (env: {ENV_ENABLE_OAUTH})."
+        ),
+    )
     return parser
 
 
@@ -330,4 +374,30 @@ def _resolve_int(
             raise ValueError(
                 f"{field_name} env value {env_value!r} is not an integer"
             ) from exc
+    return default
+
+
+_TRUE_TOKENS: frozenset[str] = frozenset({"1", "true", "yes", "on"})
+_FALSE_TOKENS: frozenset[str] = frozenset({"0", "false", "no", "off"})
+
+
+def _resolve_bool(
+    *,
+    cli: bool | None,
+    env_value: str | None,
+    default: bool,
+    field_name: str,
+) -> bool:
+    if cli is not None:
+        return cli
+    if env_value is not None:
+        token = env_value.strip().lower()
+        if token in _TRUE_TOKENS:
+            return True
+        if token in _FALSE_TOKENS:
+            return False
+        raise ValueError(
+            f"{field_name} env value {env_value!r} is not a boolean; "
+            f"use one of: {', '.join(sorted(_TRUE_TOKENS | _FALSE_TOKENS))}"
+        )
     return default
