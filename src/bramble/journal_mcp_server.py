@@ -28,7 +28,12 @@ from typing import Any
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
-from fastmcp.server.dependencies import get_http_headers, get_http_request
+from fastmcp.server.auth import AuthProvider
+from fastmcp.server.dependencies import (
+    get_access_token,
+    get_http_headers,
+    get_http_request,
+)
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 
 from bramble.agent_guide import AGENT_GUIDE, AGENT_GUIDE_VERSION
@@ -40,6 +45,7 @@ from bramble.journal_entry import JournalEntry, JournalStatus
 from bramble.mcp_errors import translate_errors
 from bramble.open_item import OpenItemView
 from bramble.rate_limiter import RateLimiter
+from bramble.static_token_verifier import STATIC_CLIENT_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -360,6 +366,100 @@ class _AuthRateLimitMiddleware(Middleware):
         return project
 
 
+# Tools that mutate the journal. The OAuth path is read-only (Phase-6
+# decision D3): a principal whose scopes lack ``journal:write`` may not call
+# these. Static tokens carry journal:write and keep their write capability.
+_WRITE_TOOLS: frozenset[str] = frozenset({"journal_append", "journal_resolve"})
+
+# The scope a principal must hold to call a write tool.
+_WRITE_SCOPE = "journal:write"
+
+
+class _PrincipalRateLimitMiddleware(Middleware):
+    """Rate-limit + scope policy for the OAuth (``MultiAuth``) http mode.
+
+    When the server is built with an ``auth_provider`` (FastMCP native
+    auth), the bearer token is validated at the ASGI layer and the
+    authenticated principal is exposed via
+    :func:`~fastmcp.server.dependencies.get_access_token`. This tool
+    middleware enforces the Bramble-specific policy the framework does
+    not:
+
+    * per-IP and per-principal rate limits;
+    * the read-only gate – an OAuth principal (no ``journal:write`` scope)
+      cannot call a write tool, while static tokens may;
+    * the project write-scope binding – a static token is bound to its
+      project (``client_id == "static:<project>"``) so ``journal_append``
+      can only write there. OAuth principals carry no project binding and
+      cannot write anyway.
+
+    A request that reaches the tool layer with no principal is refused
+    (defence in depth): on the real http path the ASGI auth gate fails
+    such a request before it gets here, so this guards the in-process and
+    misconfiguration cases. The decision logic lives in :meth:`_authorize`
+    (free of FastMCP types) so it is unit-testable in-process.
+    """
+
+    def __init__(self, rate_limiter: RateLimiter) -> None:
+        self._rate_limiter = rate_limiter
+
+    async def on_call_tool(
+        self, context: MiddlewareContext, call_next: CallNext
+    ) -> Any:
+        principal = get_access_token()
+        client_ip = self._client_ip()
+        tool_name = getattr(context.message, "name", "") or ""
+        project = self._authorize(
+            principal=principal, client_ip=client_ip, tool_name=tool_name
+        )
+        reset = _token_project.set(project)
+        try:
+            return await call_next(context)
+        finally:
+            _token_project.reset(reset)
+
+    @staticmethod
+    def _client_ip() -> str:
+        try:
+            request = get_http_request()
+        except RuntimeError:
+            return "unknown"
+        return _resolve_client_ip(request)
+
+    def _authorize(
+        self, *, principal: Any, client_ip: str, tool_name: str
+    ) -> str | None:
+        """Apply rate-limit + scope policy; return the bound project or None.
+
+        Takes the already-resolved principal (an ``AccessToken`` or
+        ``None``) so it can be unit-tested without a live request. The
+        per-IP limit is the backstop applied first; then the principal is
+        required; then the per-principal limit, the write gate and the
+        project binding.
+        """
+
+        if not self._rate_limiter.allow_ip(client_ip):
+            raise ToolError("rate limit exceeded; slow down")
+        if principal is None:
+            raise ToolError(
+                "authentication required: missing or invalid bearer token"
+            )
+        principal_key = getattr(principal, "client_id", None) or "unknown"
+        if not self._rate_limiter.allow_project(principal_key):
+            raise ToolError("rate limit exceeded; slow down")
+
+        scopes = set(getattr(principal, "scopes", None) or ())
+        if tool_name in _WRITE_TOOLS and _WRITE_SCOPE not in scopes:
+            raise ToolError(
+                f"this token is read-only; {tool_name} requires write access"
+            )
+
+        client_id = getattr(principal, "client_id", None) or ""
+        if client_id.startswith(STATIC_CLIENT_PREFIX):
+            return client_id[len(STATIC_CLIENT_PREFIX) :]
+        return None
+
+
 class JournalMCPServer:
     """MCP-facing server that exposes :class:`JournalDB` operations.
 
@@ -370,10 +470,22 @@ class JournalMCPServer:
         already be initialised (``db.initialize()`` was called).
     auth_validator:
         Resolves bearer tokens to projects. Supply together with
-        ``rate_limiter`` to gate the ``http`` transport; leave unset
-        for ``stdio``. Providing only one of the two raises.
+        ``rate_limiter`` to gate the ``http`` transport with the Phase-3
+        static-bearer path; leave unset for ``stdio``. Providing only one
+        of the two raises. Mutually exclusive with ``auth_provider``.
     rate_limiter:
-        Token-bucket request limiter. See ``auth_validator``.
+        Token-bucket request limiter. Required by both the static-bearer
+        path (with ``auth_validator``) and the OAuth path (with
+        ``auth_provider``).
+    auth_provider:
+        A FastMCP :class:`AuthProvider` (Phase-6: a ``MultiAuth`` wrapping
+        the self-hosted OAuth AS plus a static-token verifier). When
+        supplied, it is handed to ``FastMCP(auth=...)`` so the framework
+        mounts the discovery / ``/authorize`` / ``/token`` / ``/register``
+        routes and gates ``/mcp`` at the ASGI layer; a
+        :class:`_PrincipalRateLimitMiddleware` then enforces rate limits,
+        the read-only gate and the project binding. Requires
+        ``rate_limiter`` and is mutually exclusive with ``auth_validator``.
     """
 
     def __init__(
@@ -382,10 +494,20 @@ class JournalMCPServer:
         *,
         auth_validator: AuthValidator | None = None,
         rate_limiter: RateLimiter | None = None,
+        auth_provider: AuthProvider | None = None,
     ) -> None:
         if not isinstance(db, JournalDB):
             raise TypeError("db must be a JournalDB instance")
-        if (auth_validator is None) != (rate_limiter is None):
+        if auth_provider is not None:
+            if auth_validator is not None:
+                raise ValueError(
+                    "auth_provider is mutually exclusive with auth_validator: "
+                    "in the OAuth mode the static-token path lives inside the "
+                    "provider (MultiAuth verifier), not a separate validator"
+                )
+            if rate_limiter is None:
+                raise ValueError("auth_provider requires a rate_limiter")
+        elif (auth_validator is None) != (rate_limiter is None):
             raise ValueError(
                 "auth_validator and rate_limiter must be provided together: "
                 "both for the authenticated http transport, or neither"
@@ -394,10 +516,11 @@ class JournalMCPServer:
         self._db = db
         self._auth_validator = auth_validator
         self._rate_limiter = rate_limiter
+        self._auth_provider = auth_provider
 
-        self._app: FastMCP = FastMCP(
-            name="bramble",
-            instructions=(
+        app_kwargs: dict[str, Any] = {
+            "name": "bramble",
+            "instructions": (
                 "Shared development journal across projects. "
                 "At session start, first call journal_guide for the "
                 "canonical, project-agnostic working conventions "
@@ -411,9 +534,14 @@ class JournalMCPServer:
                 "snapshots, journal_resolve to close open items via "
                 "resolves links, and journal_list_projects for an overview."
             ),
-        )
+        }
+        if auth_provider is not None:
+            app_kwargs["auth"] = auth_provider
+        self._app = FastMCP(**app_kwargs)
         self._register_tools()
-        if auth_validator is not None and rate_limiter is not None:
+        if auth_provider is not None and rate_limiter is not None:
+            self._app.add_middleware(_PrincipalRateLimitMiddleware(rate_limiter))
+        elif auth_validator is not None and rate_limiter is not None:
             self._app.add_middleware(
                 _AuthRateLimitMiddleware(auth_validator, rate_limiter)
             )

@@ -54,15 +54,63 @@ def main() -> None:
         server.run(transport="stdio")
     else:
         db.register_projects(load_token_map(config.tokens_file).keys())
-        auth_validator = AuthValidator(config.tokens_file)
         rate_limiter = RateLimiter(
             per_token_rpm=config.rate_limit_per_token,
             per_ip_rpm=config.rate_limit_per_ip,
         )
-        server = JournalMCPServer(
-            db, auth_validator=auth_validator, rate_limiter=rate_limiter
-        )
+        if config.enable_oauth:
+            # OAuth mode: the self-hosted Authorization Server protects /mcp
+            # and a static-token verifier inside the same MultiAuth keeps the
+            # legacy bearer path working (Phase-6 decision D3/D4).
+            server = JournalMCPServer(
+                db,
+                auth_provider=_build_oauth_auth(config),
+                rate_limiter=rate_limiter,
+            )
+            logger.info("OAuth authorization server enabled for http transport")
+        else:
+            auth_validator = AuthValidator(config.tokens_file)
+            server = JournalMCPServer(
+                db, auth_validator=auth_validator, rate_limiter=rate_limiter
+            )
         server.run(transport="http", host=config.host, port=config.port)
+
+
+def _build_oauth_auth(config: ServerConfig):
+    """Build the Phase-6 ``MultiAuth`` (OAuth AS + static-token verifier).
+
+    OAuth-specific modules are imported lazily here so the much more common
+    stdio / static-http paths never pull them in. ``OAuthConfig.from_env``
+    raises if the required public base URL is missing, which is the right
+    fail-fast behaviour once OAuth has been switched on.
+    """
+
+    from fastmcp.server.auth.auth import MultiAuth
+
+    from bramble.oauth_config import OAuthConfig
+    from bramble.oauth_provider import BrambleOAuthProvider
+    from bramble.oauth_store import OAuthStore
+    from bramble.static_token_verifier import StaticTokenVerifier
+
+    oauth_config = OAuthConfig.from_env()
+    store = OAuthStore(oauth_config.oauth_db_path)
+    store.initialize()
+    provider = BrambleOAuthProvider(store=store, config=oauth_config)
+    static_verifier = StaticTokenVerifier(AuthValidator(config.tokens_file))
+    logger.info(
+        "oauth config",
+        extra={
+            "public_base_url": oauth_config.public_base_url,
+            "oauth_db_path": str(oauth_config.oauth_db_path),
+            "enable_dcr": oauth_config.enable_dcr,
+            "has_static_client": oauth_config.has_static_client,
+        },
+    )
+    return MultiAuth(
+        server=provider,
+        verifiers=[static_verifier],
+        base_url=oauth_config.public_base_url,
+    )
 
 
 if __name__ == "__main__":

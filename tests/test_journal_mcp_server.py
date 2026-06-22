@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from fastmcp import Client, FastMCP
 from fastmcp.exceptions import ToolError
+from mcp.server.auth.provider import AccessToken
 
 from bramble.agent_guide import AGENT_GUIDE_VERSION
 from bramble.auth_validator import AuthValidator
@@ -21,11 +22,13 @@ from bramble.journal_mcp_server import (
     _bearer_token,
     _enforce_project_scope,
     _entry_to_dict,
+    _PrincipalRateLimitMiddleware,
     _require_kebab_case,
     _resolve_client_ip,
     _token_project,
 )
 from bramble.rate_limiter import RateLimiter
+from bramble.static_token_verifier import STATIC_CLIENT_PREFIX
 
 
 @pytest.fixture()
@@ -1386,6 +1389,98 @@ class TestAuthorize:
 # ---------------------------------------------------------------------------
 # Phase-3 Decision B: journal_append write-scope binding
 # ---------------------------------------------------------------------------
+def _principal(client_id: str, scopes: list[str]) -> AccessToken:
+    return AccessToken(token="t", client_id=client_id, scopes=scopes)
+
+
+class TestPrincipalAuthorize:
+    """Unit tests for the OAuth-mode tool middleware's decision logic."""
+
+    def _mw(self, rate_limiter: RateLimiter) -> _PrincipalRateLimitMiddleware:
+        return _PrincipalRateLimitMiddleware(rate_limiter)
+
+    def test_static_principal_returns_bound_project(
+        self, rate_limiter: RateLimiter
+    ) -> None:
+        mw = self._mw(rate_limiter)
+        project = mw._authorize(
+            principal=_principal(
+                f"{STATIC_CLIENT_PREFIX}bramble", ["journal:read", "journal:write"]
+            ),
+            client_ip="1.2.3.4",
+            tool_name="journal_read",
+        )
+        assert project == "bramble"
+
+    def test_oauth_principal_has_no_project_binding(
+        self, rate_limiter: RateLimiter
+    ) -> None:
+        mw = self._mw(rate_limiter)
+        project = mw._authorize(
+            principal=_principal("dcr-client-xyz", ["journal:read"]),
+            client_ip="1.2.3.4",
+            tool_name="journal_read",
+        )
+        assert project is None
+
+    def test_missing_principal_is_refused(self, rate_limiter: RateLimiter) -> None:
+        mw = self._mw(rate_limiter)
+        with pytest.raises(ToolError, match="authentication"):
+            mw._authorize(principal=None, client_ip="1.2.3.4", tool_name="journal_read")
+
+    def test_read_only_principal_blocked_from_write_tool(
+        self, rate_limiter: RateLimiter
+    ) -> None:
+        mw = self._mw(rate_limiter)
+        for tool in ("journal_append", "journal_resolve"):
+            with pytest.raises(ToolError, match="read-only"):
+                mw._authorize(
+                    principal=_principal("dcr-client-xyz", ["journal:read"]),
+                    client_ip="1.2.3.4",
+                    tool_name=tool,
+                )
+
+    def test_write_capable_principal_allowed_on_write_tool(
+        self, rate_limiter: RateLimiter
+    ) -> None:
+        mw = self._mw(rate_limiter)
+        project = mw._authorize(
+            principal=_principal(
+                f"{STATIC_CLIENT_PREFIX}bramble", ["journal:read", "journal:write"]
+            ),
+            client_ip="1.2.3.4",
+            tool_name="journal_append",
+        )
+        assert project == "bramble"
+
+    def test_read_only_principal_allowed_on_read_tool(
+        self, rate_limiter: RateLimiter
+    ) -> None:
+        mw = self._mw(rate_limiter)
+        # No raise: a read tool is fine for a read-only token.
+        mw._authorize(
+            principal=_principal("dcr-client-xyz", ["journal:read"]),
+            client_ip="1.2.3.4",
+            tool_name="journal_search",
+        )
+
+    def test_exhausted_ip_budget_raises(self) -> None:
+        limiter = RateLimiter(per_token_rpm=100, per_ip_rpm=1)
+        mw = self._mw(limiter)
+        p = _principal("dcr-client", ["journal:read"])
+        mw._authorize(principal=p, client_ip="9.9.9.9", tool_name="journal_read")
+        with pytest.raises(ToolError, match="rate limit"):
+            mw._authorize(principal=p, client_ip="9.9.9.9", tool_name="journal_read")
+
+    def test_exhausted_principal_budget_raises(self) -> None:
+        limiter = RateLimiter(per_token_rpm=1, per_ip_rpm=100)
+        mw = self._mw(limiter)
+        p = _principal("dcr-client", ["journal:read"])
+        mw._authorize(principal=p, client_ip="1.1.1.1", tool_name="journal_read")
+        with pytest.raises(ToolError, match="rate limit"):
+            mw._authorize(principal=p, client_ip="1.1.1.2", tool_name="journal_read")
+
+
 class TestProjectScope:
     def test_no_binding_when_context_unset(self) -> None:
         # stdio / no-auth: any project may be written.
@@ -1653,3 +1748,76 @@ class TestAuthenticatedServer:
         async with Client(server.app) as client:
             result = await client.call_tool("journal_list_projects", {})
         assert result.data == []
+
+
+@pytest.fixture()
+def oauth_auth(tmp_path: Path, auth_validator: AuthValidator):
+    """A MultiAuth wrapping the real OAuth provider + static-token verifier."""
+
+    from fastmcp.server.auth.auth import MultiAuth
+
+    from bramble.oauth_config import OAuthConfig
+    from bramble.oauth_provider import BrambleOAuthProvider
+    from bramble.oauth_store import OAuthStore
+    from bramble.static_token_verifier import StaticTokenVerifier
+
+    base = "https://journal.last-strawberry.com"
+    store = OAuthStore(tmp_path / "oauth.db")
+    store.initialize()
+    provider = BrambleOAuthProvider(
+        store=store, config=OAuthConfig(public_base_url=base)
+    )
+    return MultiAuth(
+        server=provider,
+        verifiers=[StaticTokenVerifier(auth_validator)],
+        base_url=base,
+    )
+
+
+class TestOAuthModeConstruction:
+    def test_auth_provider_requires_rate_limiter(
+        self, db: JournalDB, oauth_auth
+    ) -> None:
+        with pytest.raises(ValueError, match="rate_limiter"):
+            JournalMCPServer(db, auth_provider=oauth_auth)
+
+    def test_auth_provider_mutually_exclusive_with_validator(
+        self,
+        db: JournalDB,
+        oauth_auth,
+        auth_validator: AuthValidator,
+        rate_limiter: RateLimiter,
+    ) -> None:
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            JournalMCPServer(
+                db,
+                auth_provider=oauth_auth,
+                auth_validator=auth_validator,
+                rate_limiter=rate_limiter,
+            )
+
+    def test_wires_provider_and_mounts_as_routes(
+        self, db: JournalDB, oauth_auth, rate_limiter: RateLimiter
+    ) -> None:
+        srv = JournalMCPServer(
+            db, auth_provider=oauth_auth, rate_limiter=rate_limiter
+        )
+        assert srv._auth_provider is oauth_auth
+        paths = {getattr(r, "path", None) for r in srv.app.http_app().routes}
+        # FastMCP(auth=...) mounts the AS + discovery routes at root.
+        assert "/authorize" in paths
+        assert "/token" in paths
+        assert "/register" in paths
+        assert "/.well-known/oauth-authorization-server" in paths
+
+    async def test_no_principal_call_is_refused(
+        self, db: JournalDB, oauth_auth, rate_limiter: RateLimiter
+    ) -> None:
+        # The in-process client bypasses the ASGI auth gate, so the tool
+        # middleware itself must refuse a call that carries no principal.
+        srv = JournalMCPServer(
+            db, auth_provider=oauth_auth, rate_limiter=rate_limiter
+        )
+        async with Client(srv.app) as client:
+            with pytest.raises(ToolError, match="authentication"):
+                await client.call_tool("journal_read", {"project": "bramble"})
