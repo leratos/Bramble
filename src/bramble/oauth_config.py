@@ -255,6 +255,14 @@ class OAuthConfig:
             )
         if not isinstance(self.static_client_id, str) or not self.static_client_id:
             raise ValueError("static_client_id must be a non-empty string")
+        # "static:" is reserved: the MCP-layer middleware reads it as the
+        # legacy local-bearer marker (static_token_verifier.STATIC_CLIENT_PREFIX)
+        # and would treat an OAuth token with such an id as a static principal,
+        # bypassing the owner grant + write master switch.
+        if self.static_client_id.startswith("static:"):
+            raise ValueError(
+                "static_client_id must not use the reserved 'static:' prefix"
+            )
         if not secret_set:
             raise ValueError("static_client_id requires static_client_secret")
         if (

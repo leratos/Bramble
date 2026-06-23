@@ -177,6 +177,16 @@ class TestStaticClient:
         )
         assert cfg.has_static_client is True
 
+    def test_reserved_static_prefix_rejected(self) -> None:
+        # "static:" is reserved for the legacy local-bearer principal marker.
+        with pytest.raises(ValueError, match="reserved"):
+            OAuthConfig(
+                public_base_url=_BASE,
+                static_client_id="static:bramble",
+                static_client_secret="s3cr3t",
+                static_client_redirect_uris=("https://claude.ai/cb",),
+            )
+
 
 # ---------------------------------------------------------------------------
 # from_env resolution

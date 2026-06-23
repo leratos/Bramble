@@ -212,11 +212,21 @@ class OAuthOwnerGate:
                 status_code=200,
             )
 
-        # Record the owner's write grant for this connector (keyed by
-        # client_id). Honoured only when write is enabled; an empty project
-        # (or write disabled) records an explicit read-only grant, so a
-        # re-consent can also downgrade a previous write grant.
+        # The grant is read at tool-call time, so only proceed for a real,
+        # registered client. A client_id this AS does not know (e.g. from a
+        # tampered authorize_query) must not change a grant or get an approval –
+        # the framework would reject its authorize anyway.
         client_id = params.get("client_id", "")
+        if not client_id or await asyncio.to_thread(
+            self._store.get_client, client_id
+        ) is None:
+            return self._render_consent(
+                session, authorize_query, params, error="Unknown or unregistered client."
+            )
+
+        # Record the owner's grant for this connector (keyed by client_id).
+        # A write grant needs write enabled + a valid project; otherwise an
+        # explicit read-only grant, so a re-consent can also downgrade.
         project = (form.get("project") or "").strip()
         if self._allow_write and project:
             if not _KEBAB_CASE_RE.match(project):
@@ -229,13 +239,12 @@ class OAuthOwnerGate:
             can_write, grant_project = True, project
         else:
             can_write, grant_project = False, None
-        if client_id:
-            await asyncio.to_thread(
-                self._store.save_client_grant,
-                client_id,
-                project=grant_project,
-                can_write=can_write,
-            )
+        await asyncio.to_thread(
+            self._store.save_client_grant,
+            client_id,
+            project=grant_project,
+            can_write=can_write,
+        )
 
         self._approvals.approve(
             session_id=self._sid(request), fingerprint=self._fingerprint(params)

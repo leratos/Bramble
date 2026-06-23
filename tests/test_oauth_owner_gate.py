@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 import httpx
+from mcp.shared.auth import OAuthClientInformationFull
 
 from bramble.admin_auth import (
     AdminAuthenticator,
@@ -56,6 +57,14 @@ def _build_gate(
 ) -> OAuthOwnerGate:
     store = OAuthStore(tmp_path / "oauth.db")
     store.initialize()
+    # The gate now requires the client to be registered before persisting a
+    # grant; in production DCR registers it before consent.
+    store.save_client(
+        OAuthClientInformationFull(
+            client_id="claude",
+            redirect_uris=["https://claude.ai/api/mcp/auth_callback"],
+        )
+    )
     return OAuthOwnerGate(
         _inner,
         authenticator=AdminAuthenticator(_secret_file(tmp_path)),
@@ -302,3 +311,26 @@ class TestWriteGrant:
         grant = gate._store.get_client_grant("claude")
         assert grant is not None
         assert grant.can_write is False
+
+    async def test_unregistered_client_is_rejected(self, tmp_path: Path) -> None:
+        # A consent for a client_id the AS does not know (e.g. tampered
+        # authorize_query) must not persist a grant or approve.
+        gate = _build_gate(tmp_path, allow_write=True)
+        async with _client(gate) as c:
+            await _login(c)
+            consent = await c.get(_AUTHZ)
+            r = await c.post(
+                "/oauth/consent",
+                data={
+                    "csrf_token": _hidden(consent.text, "csrf_token"),
+                    "authorize_query": (
+                        "client_id=ghost&redirect_uri=https://claude.ai/cb"
+                        "&scope=journal:read&code_challenge=abc"
+                    ),
+                    "decision": "approve",
+                    "project": "bramble",
+                },
+            )
+        assert r.status_code == 400
+        assert "Unknown" in r.text
+        assert gate._store.get_client_grant("ghost") is None

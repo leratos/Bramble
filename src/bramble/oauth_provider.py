@@ -54,6 +54,7 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
 from bramble.oauth_config import OAuthConfig
 from bramble.oauth_store import OAuthStore
+from bramble.static_token_verifier import STATIC_CLIENT_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,14 @@ class BrambleOAuthProvider(OAuthProvider):
                 )
         if client_info.client_id is None:
             raise ValueError("client_id is required for client registration")
+        # Defence in depth: never let a client carry the reserved static
+        # principal prefix (the MCP-layer middleware trusts it for the legacy
+        # bearer path). DCR ids are server-generated, so this only ever guards
+        # against a misconfigured / hostile id.
+        if client_info.client_id.startswith(STATIC_CLIENT_PREFIX):
+            raise ValueError(
+                f"client_id must not use the reserved {STATIC_CLIENT_PREFIX!r} prefix"
+            )
         await asyncio.to_thread(self._store.save_client, client_info)
         logger.info("registered oauth client %s", client_info.client_id)
 

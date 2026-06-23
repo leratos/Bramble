@@ -129,6 +129,16 @@ class TestRegistration:
         with pytest.raises(ValueError, match="client_id"):
             await provider.register_client(client)
 
+    async def test_reserved_static_prefix_client_id_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        provider, _, _ = _make_provider(tmp_path)
+        client = OAuthClientInformationFull(
+            client_id="static:bramble", redirect_uris=[_REDIRECT]
+        )
+        with pytest.raises(ValueError, match="reserved"):
+            await provider.register_client(client)
+
 
 # ---------------------------------------------------------------------------
 # Authorize
