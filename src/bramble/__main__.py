@@ -63,13 +63,16 @@ def main() -> None:
             # and a static-token verifier inside the same MultiAuth keeps the
             # legacy bearer path working (Phase-6 decision D3/D4). The owner
             # gate (Phase 6.6) authenticates the resource owner on /authorize.
-            auth_provider, http_middleware, grant_store = _build_oauth_stack(config)
+            auth_provider, http_middleware, grant_store, allow_write = (
+                _build_oauth_stack(config)
+            )
             server = JournalMCPServer(
                 db,
                 auth_provider=auth_provider,
                 rate_limiter=rate_limiter,
                 http_middleware=http_middleware,
                 oauth_grant_store=grant_store,
+                oauth_allow_write=allow_write,
             )
             logger.info("OAuth authorization server enabled for http transport")
         else:
@@ -127,7 +130,18 @@ def _build_oauth_stack(config: ServerConfig):
         )
 
     provider = BrambleOAuthProvider(store=store, config=oauth_config)
-    static_verifier = StaticTokenVerifier(AuthValidator(config.tokens_file))
+    # The static-token verifier is only the backwards-compatibility path. On a
+    # DCR-only deployment there may be no tokens file, and AuthValidator would
+    # raise FileNotFoundError; skip the verifier in that case so OAuth-only
+    # deployments start (load_token_map already tolerates the absence).
+    verifiers = []
+    if config.tokens_file.exists():
+        verifiers.append(StaticTokenVerifier(AuthValidator(config.tokens_file)))
+    else:
+        logger.info(
+            "no tokens file at %s; running OAuth-only (no static verifier)",
+            config.tokens_file,
+        )
     logger.info(
         "oauth config",
         extra={
@@ -139,11 +153,11 @@ def _build_oauth_stack(config: ServerConfig):
     )
     auth_provider = MultiAuth(
         server=provider,
-        verifiers=[static_verifier],
+        verifiers=verifiers,
         base_url=oauth_config.public_base_url,
     )
     owner_gate = build_owner_gate(oauth_config, store)
-    return auth_provider, [owner_gate], store
+    return auth_provider, [owner_gate], store, oauth_config.allow_oauth_write
 
 
 if __name__ == "__main__":

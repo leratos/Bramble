@@ -400,11 +400,22 @@ class _PrincipalRateLimitMiddleware(Middleware):
     (free of FastMCP types) so it is unit-testable in-process.
     """
 
-    def __init__(self, rate_limiter: RateLimiter, *, grant_store: Any = None) -> None:
+    def __init__(
+        self,
+        rate_limiter: RateLimiter,
+        *,
+        grant_store: Any = None,
+        allow_write: bool = False,
+    ) -> None:
         self._rate_limiter = rate_limiter
         # OAuthStore (or any object with get_client_grant); consulted only for
         # OAuth write tools to find the owner's per-connector write grant.
         self._grant_store = grant_store
+        # The OAuth write master switch. When off, OAuth principals are
+        # read-only regardless of any stored grant – so flipping the switch
+        # back to false (rollback / incident response) immediately stops
+        # previously authorized connectors from writing.
+        self._allow_write = allow_write
 
     async def on_call_tool(
         self, context: MiddlewareContext, call_next: CallNext
@@ -419,6 +430,7 @@ class _PrincipalRateLimitMiddleware(Middleware):
         client_id = getattr(principal, "client_id", "") or ""
         if (
             tool_name in _WRITE_TOOLS
+            and self._allow_write
             and self._grant_store is not None
             and client_id
             and not client_id.startswith(STATIC_CLIENT_PREFIX)
@@ -479,8 +491,10 @@ class _PrincipalRateLimitMiddleware(Middleware):
             # Static token: bound to its project, carries journal:write.
             project: str | None = client_id[len(STATIC_CLIENT_PREFIX) :]
             can_write = _WRITE_SCOPE in set(getattr(principal, "scopes", None) or ())
-        elif grant is not None and grant.can_write and grant.project:
-            # OAuth token with an explicit owner write grant for one project.
+        elif self._allow_write and grant is not None and grant.can_write and grant.project:
+            # OAuth token with an explicit owner write grant for one project,
+            # and the write master switch is currently on. Checking the switch
+            # here too means flipping it off ignores stored grants immediately.
             project = grant.project
             can_write = True
         else:
@@ -536,6 +550,7 @@ class JournalMCPServer:
         auth_provider: AuthProvider | None = None,
         http_middleware: list[Any] | None = None,
         oauth_grant_store: Any = None,
+        oauth_allow_write: bool = False,
     ) -> None:
         if not isinstance(db, JournalDB):
             raise TypeError("db must be a JournalDB instance")
@@ -562,6 +577,7 @@ class JournalMCPServer:
         # served http app. Empty for stdio / the legacy static-http path.
         self._http_middleware: list[Any] = list(http_middleware or [])
         self._oauth_grant_store = oauth_grant_store
+        self._oauth_allow_write = oauth_allow_write
 
         app_kwargs: dict[str, Any] = {
             "name": "bramble",
@@ -587,7 +603,9 @@ class JournalMCPServer:
         if auth_provider is not None and rate_limiter is not None:
             self._app.add_middleware(
                 _PrincipalRateLimitMiddleware(
-                    rate_limiter, grant_store=oauth_grant_store
+                    rate_limiter,
+                    grant_store=oauth_grant_store,
+                    allow_write=oauth_allow_write,
                 )
             )
         elif auth_validator is not None and rate_limiter is not None:

@@ -1397,8 +1397,10 @@ def _principal(client_id: str, scopes: list[str]) -> AccessToken:
 class TestPrincipalAuthorize:
     """Unit tests for the OAuth-mode tool middleware's decision logic."""
 
-    def _mw(self, rate_limiter: RateLimiter) -> _PrincipalRateLimitMiddleware:
-        return _PrincipalRateLimitMiddleware(rate_limiter)
+    def _mw(
+        self, rate_limiter: RateLimiter, *, allow_write: bool = False
+    ) -> _PrincipalRateLimitMiddleware:
+        return _PrincipalRateLimitMiddleware(rate_limiter, allow_write=allow_write)
 
     def test_static_principal_returns_bound_project(
         self, rate_limiter: RateLimiter
@@ -1498,7 +1500,7 @@ class TestPrincipalAuthorize:
     def test_oauth_write_with_owner_grant_returns_project(
         self, rate_limiter: RateLimiter
     ) -> None:
-        mw = self._mw(rate_limiter)
+        mw = self._mw(rate_limiter, allow_write=True)
         grant = ClientGrant(client_id="dcr-xyz", project="work", can_write=True)
         project = mw._authorize(
             principal=_principal("dcr-xyz", ["journal:read"]),
@@ -1508,10 +1510,25 @@ class TestPrincipalAuthorize:
         )
         assert project == "work"
 
+    def test_write_grant_ignored_when_master_switch_off(
+        self, rate_limiter: RateLimiter
+    ) -> None:
+        # Rollback/incident response: with allow_write off, even a stored write
+        # grant must not allow writing.
+        mw = self._mw(rate_limiter, allow_write=False)
+        grant = ClientGrant(client_id="dcr-xyz", project="work", can_write=True)
+        with pytest.raises(ToolError, match="read-only"):
+            mw._authorize(
+                principal=_principal("dcr-xyz", ["journal:read"]),
+                client_ip="1.2.3.4",
+                tool_name="journal_append",
+                grant=grant,
+            )
+
     def test_oauth_write_with_read_only_grant_is_blocked(
         self, rate_limiter: RateLimiter
     ) -> None:
-        mw = self._mw(rate_limiter)
+        mw = self._mw(rate_limiter, allow_write=True)
         grant = ClientGrant(client_id="dcr-xyz", project=None, can_write=False)
         with pytest.raises(ToolError, match="read-only"):
             mw._authorize(

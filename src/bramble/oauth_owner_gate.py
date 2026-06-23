@@ -110,8 +110,16 @@ class OAuthOwnerGate:
             return
         path = scope.get("path", "")
         method = scope.get("method", "GET")
-        if path == AUTHORIZE_PATH and method == "GET":
-            await self._handle_authorize(scope, receive, send)
+        if path == AUTHORIZE_PATH:
+            if method == "GET":
+                await self._handle_authorize(scope, receive, send)
+            else:
+                # The MCP SDK mounts /authorize for GET, HEAD and POST. Only
+                # the GET-based owner flow may reach the framework's authorize
+                # handler — delegating any other method would let a client POST
+                # the OAuth fields straight to provider.authorize() and mint a
+                # code, bypassing owner login + consent entirely.
+                await self._respond(scope, receive, send, _method_not_allowed())
             return
         if path == LOGIN_PATH and method == "POST":
             await self._respond(scope, receive, send, await self._login(scope, receive))
@@ -325,6 +333,10 @@ class OAuthOwnerGate:
     @staticmethod
     async def _respond(scope: Any, receive: Any, send: Any, response: Response) -> None:
         await response(scope, receive, send)
+
+
+def _method_not_allowed() -> Response:
+    return Response("Method Not Allowed", status_code=405, headers={"Allow": "GET"})
 
 
 def _safe_next(value: str | None) -> str:

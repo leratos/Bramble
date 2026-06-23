@@ -8,6 +8,7 @@ stdio/HTTP server, which would block forever.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from bramble import __main__ as cli
+from bramble.admin_auth import hash_admin_password
 from bramble.journal_db import JournalDB
 from bramble.journal_mcp_server import JournalMCPServer
 from bramble.server_config import (
@@ -163,6 +165,55 @@ class TestMainWiring:
 
         assert built["auth_validator"] is not None
         assert built["rate_limiter"] is not None
+
+    def test_oauth_only_without_tokens_file_starts(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        # OAuth enabled on a DCR-only deployment (no tokens.json) must start:
+        # the static verifier is skipped, not a startup crash.
+        _clear_bramble_env(monkeypatch)
+        owner_secret = tmp_path / "oauth-owner.json"
+        owner_secret.write_text(
+            json.dumps(
+                {"username": "owner", "password_hash": hash_admin_password("pw")}
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("BRAMBLE_ENABLE_OAUTH", "true")
+        monkeypatch.setenv("BRAMBLE_OAUTH_PUBLIC_BASE_URL", "https://journal.test")
+        monkeypatch.setenv("BRAMBLE_OAUTH_OWNER_SECRET_FILE", str(owner_secret))
+        monkeypatch.setenv("BRAMBLE_OAUTH_DB_PATH", str(tmp_path / "oauth.db"))
+        absent_tokens = tmp_path / "absent-tokens.json"  # deliberately missing
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "bramble-server",
+                "--db",
+                str(tmp_path / "bramble.db"),
+                "--transport",
+                "http",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "9100",
+                "--tokens-file",
+                str(absent_tokens),
+            ],
+        )
+
+        built: dict = {}
+
+        def fake_run(self: JournalMCPServer, **kwargs: object) -> None:
+            built["auth_provider"] = self._auth_provider
+
+        monkeypatch.setattr(JournalMCPServer, "run", fake_run)
+
+        cli.main()  # must not raise FileNotFoundError on the missing tokens file
+
+        assert built["auth_provider"] is not None
 
     def test_env_var_path_is_honoured(
         self,

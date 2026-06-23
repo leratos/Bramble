@@ -111,6 +111,25 @@ class TestLogin:
         assert "Sign in" in r.text
         assert r.text != "DELEGATED"
 
+    async def test_post_authorize_cannot_bypass_the_gate(
+        self, tmp_path: Path
+    ) -> None:
+        # The MCP SDK route also accepts POST /authorize; the gate must refuse
+        # it, else a client posts the OAuth fields and mints a code without
+        # owner login/consent.
+        async with _client(_build_gate(tmp_path)) as c:
+            r = await c.post(
+                "/authorize",
+                data={
+                    "client_id": "evil",
+                    "redirect_uri": "https://evil.test/cb",
+                    "code_challenge": "x",
+                    "response_type": "code",
+                },
+            )
+        assert r.status_code == 405
+        assert r.text != "DELEGATED"
+
     async def test_bad_credentials_rejected(self, tmp_path: Path) -> None:
         async with _client(_build_gate(tmp_path)) as c:
             r = await _login(c, password="wrong")
