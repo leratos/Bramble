@@ -39,6 +39,8 @@ from pathlib import Path
 from mcp.server.auth.provider import AccessToken, AuthorizationCode, RefreshToken
 from mcp.shared.auth import OAuthClientInformationFull
 
+from bramble.client_grant import ClientGrant
+
 logger = logging.getLogger(__name__)
 
 
@@ -79,6 +81,17 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
         access_token   TEXT,
         data           TEXT NOT NULL,
         created_at     TEXT NOT NULL
+    )
+    """,
+    # Phase 6.7: owner-granted write authorization per client (connector).
+    # Set only by the owner gate after login + consent; read by the MCP-layer
+    # middleware to decide OAuth write access. NULL project = read-only.
+    """
+    CREATE TABLE IF NOT EXISTS oauth_client_grants (
+        client_id   TEXT PRIMARY KEY,
+        project     TEXT,
+        can_write   INTEGER NOT NULL DEFAULT 0,
+        created_at  TEXT NOT NULL
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_auth_codes_expiry "
@@ -324,6 +337,43 @@ class OAuthStore:
         if row is None:
             return None
         return row["token"]
+
+    # ------------------------------------------------------------------
+    # Client grants (Phase 6.7 – owner-granted write authorization)
+    # ------------------------------------------------------------------
+    def save_client_grant(
+        self, client_id: str, *, project: str | None, can_write: bool
+    ) -> None:
+        """Insert or replace the owner's grant for ``client_id`` (upsert)."""
+
+        if not client_id:
+            raise ValueError("client_id must be non-empty")
+        if can_write and not project:
+            raise ValueError("a write grant requires a project")
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO oauth_client_grants "
+                "(client_id, project, can_write, created_at) VALUES (?, ?, ?, ?)",
+                (client_id, project, 1 if can_write else 0, _now_iso()),
+            )
+            conn.commit()
+
+    def get_client_grant(self, client_id: str) -> ClientGrant | None:
+        """Return the owner's grant for ``client_id`` or ``None``."""
+
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT project, can_write FROM oauth_client_grants "
+                "WHERE client_id = ?",
+                (client_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return ClientGrant(
+            client_id=client_id,
+            project=row["project"],
+            can_write=bool(row["can_write"]),
+        )
 
     # ------------------------------------------------------------------
     # Maintenance

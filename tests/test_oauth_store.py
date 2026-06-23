@@ -255,3 +255,41 @@ class TestPurgeExpired:
             store.purge_expired(True)  # type: ignore[arg-type]
         with pytest.raises(TypeError):
             store.purge_expired("1000")  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Client grants (Phase 6.7)
+# ---------------------------------------------------------------------------
+class TestClientGrants:
+    def test_save_and_get_write_grant(self, store: OAuthStore) -> None:
+        store.save_client_grant("client-1", project="bramble", can_write=True)
+        grant = store.get_client_grant("client-1")
+        assert grant is not None
+        assert grant.client_id == "client-1"
+        assert grant.project == "bramble"
+        assert grant.can_write is True
+
+    def test_read_only_grant(self, store: OAuthStore) -> None:
+        store.save_client_grant("client-1", project=None, can_write=False)
+        grant = store.get_client_grant("client-1")
+        assert grant is not None
+        assert grant.can_write is False
+        assert grant.project is None
+
+    def test_get_missing_returns_none(self, store: OAuthStore) -> None:
+        assert store.get_client_grant("nope") is None
+
+    def test_reconsent_downgrades(self, store: OAuthStore) -> None:
+        store.save_client_grant("client-1", project="bramble", can_write=True)
+        store.save_client_grant("client-1", project=None, can_write=False)
+        grant = store.get_client_grant("client-1")
+        assert grant is not None
+        assert grant.can_write is False
+
+    def test_write_grant_requires_project(self, store: OAuthStore) -> None:
+        with pytest.raises(ValueError, match="project"):
+            store.save_client_grant("client-1", project=None, can_write=True)
+
+    def test_empty_client_id_rejected(self, store: OAuthStore) -> None:
+        with pytest.raises(ValueError):
+            store.save_client_grant("", project="bramble", can_write=True)

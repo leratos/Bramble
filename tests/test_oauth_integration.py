@@ -184,7 +184,8 @@ def gated_http_app(tmp_path: Path, db: JournalDB):
             public_base_url=_BASE,
             owner_secret_file=owner_secret,
             owner_cookie_secure=False,
-        )
+        ),
+        stack.store,
     )
     server = JournalMCPServer(
         db,

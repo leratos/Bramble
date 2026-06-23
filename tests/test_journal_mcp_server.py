@@ -14,6 +14,7 @@ from mcp.server.auth.provider import AccessToken
 
 from bramble.agent_guide import AGENT_GUIDE_VERSION
 from bramble.auth_validator import AuthValidator
+from bramble.client_grant import ClientGrant
 from bramble.journal_db import JournalDB
 from bramble.journal_entry import JournalEntry, JournalEntryLink, JournalStatus
 from bramble.journal_mcp_server import (
@@ -1480,19 +1481,57 @@ class TestPrincipalAuthorize:
         with pytest.raises(ToolError, match="rate limit"):
             mw._authorize(principal=p, client_ip="1.1.1.2", tool_name="journal_read")
 
-    def test_oauth_principal_with_write_scope_but_no_binding_is_blocked(
+    def test_oauth_principal_with_write_scope_but_no_grant_is_blocked(
         self, rate_limiter: RateLimiter
     ) -> None:
-        # Misconfig hardening: even if an OAuth principal carries journal:write
-        # (operator added it to the OAuth scopes), it has no project binding and
-        # must NOT be allowed to write to any project.
+        # Even a token scope can't grant write: OAuth write comes solely from
+        # an owner grant. No grant -> read-only.
         mw = self._mw(rate_limiter)
         with pytest.raises(ToolError, match="read-only"):
             mw._authorize(
                 principal=_principal("dcr-xyz", ["journal:read", "journal:write"]),
                 client_ip="1.2.3.4",
                 tool_name="journal_append",
+                grant=None,
             )
+
+    def test_oauth_write_with_owner_grant_returns_project(
+        self, rate_limiter: RateLimiter
+    ) -> None:
+        mw = self._mw(rate_limiter)
+        grant = ClientGrant(client_id="dcr-xyz", project="work", can_write=True)
+        project = mw._authorize(
+            principal=_principal("dcr-xyz", ["journal:read"]),
+            client_ip="1.2.3.4",
+            tool_name="journal_append",
+            grant=grant,
+        )
+        assert project == "work"
+
+    def test_oauth_write_with_read_only_grant_is_blocked(
+        self, rate_limiter: RateLimiter
+    ) -> None:
+        mw = self._mw(rate_limiter)
+        grant = ClientGrant(client_id="dcr-xyz", project=None, can_write=False)
+        with pytest.raises(ToolError, match="read-only"):
+            mw._authorize(
+                principal=_principal("dcr-xyz", ["journal:read"]),
+                client_ip="1.2.3.4",
+                tool_name="journal_append",
+                grant=grant,
+            )
+
+    def test_oauth_read_is_unaffected_by_grant(
+        self, rate_limiter: RateLimiter
+    ) -> None:
+        mw = self._mw(rate_limiter)
+        project = mw._authorize(
+            principal=_principal("dcr-xyz", ["journal:read"]),
+            client_ip="1.2.3.4",
+            tool_name="journal_read",
+            grant=None,
+        )
+        assert project is None
 
 
 class TestProjectScope:

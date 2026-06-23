@@ -77,6 +77,7 @@ Server (AS) plus Resource-Server-Schutz für den `/mcp`-Endpoint. Der **Go-Live*
 | `src/bramble/__main__.py` | http-OAuth-Stack (MultiAuth) + optionales Seeding des statischen Clients. |
 | `src/bramble/oauth_owner_gate.py` | `OAuthOwnerGate` (6.6) – ASGI-Login/Consent-Gate auf `/authorize`. |
 | `src/bramble/consent_store.py` | `ConsentApprovalStore` – einmalige, fingerprint-gebundene Consent-Freigaben. |
+| `src/bramble/client_grant.py` | `ClientGrant` (6.7) – owner-gesetzte Schreib-Freigabe pro Connector (Tabelle `oauth_client_grants`). |
 | `src/bramble/templates/oauth/*.html` | Login-/Consent-/Denied-Seiten (autoescaped). |
 | `scripts/gen_oauth_client.py` | erzeugt die Credentials des statischen Fallback-Clients (Env-Block). |
 
@@ -113,6 +114,40 @@ der admin-ui.json der SSH-getunnelten Admin-UI). Erzeugen:
 `python scripts/gen_admin_secret.py --output secrets/oauth-owner.json
 --username owner`. Fehlt die Datei, startet der Server im OAuth-Modus nicht
 (fail-fast). Templates autoescaped (Consent echot client-beeinflusste Werte).
+
+## Phase 6.7 – OAuth-Schreibzugriff (Projekt beim Consent gewählt)
+
+Anlass: der Web/Mobile-Zugang muss für den realen (privaten) Use-Case
+**schreiben** können – read-only wäre nutzlos („wer schreibt die Einträge?").
+Das kippt die D3-Annahme für diesen Use-Case. Gewählt (mit User): der Owner
+wählt das Zielprojekt **beim Consent** (flexibler + bessere Audit-Story als ein
+fest konfiguriertes Projekt).
+
+Mechanismus (Client-Grant-Store, **nicht** Scope-Kodierung): Die
+Schreib-Autorität liegt in einer Tabelle `oauth_client_grants` in `oauth.db`,
+gesetzt **nur** vom Owner-Gate nach Login+Consent, keyed per `client_id` (= ein
+DCR-Connector). Der ausgestellte Token bleibt `journal:read`; ein Client kann
+sich also nicht selbst hochstufen. Begründung gegen Scope-Kodierung: der
+MCP-`AuthorizationHandler` filtert Scopes gegen die Client-Registrierung, ein
+owner-gesetzter Grant umgeht das sauber.
+
+Ablauf-Erweiterung: Master-Switch `BRAMBLE_OAUTH_ALLOW_WRITE` (Default aus –
+read-only bleibt sicher). Ist er an, zeigt die Consent-Seite ein Projektfeld
+(kebab-validiert); auf *Erlauben* speichert das Gate
+`grant(client_id → project, can_write)`. Leeres Projekt / Switch aus → expliziter
+read-only-Grant (ein Re-Consent kann so auch downgraden).
+
+Enforcement: `_PrincipalRateLimitMiddleware` schlägt **nur bei Write-Tools** für
+OAuth-Prinzipale den Grant per `client_id` nach (`asyncio.to_thread` → Reads
+bleiben schnell). Write nur wenn `can_write` **und** `project` gesetzt → bindet
+`journal_append`/`journal_resolve` an genau dieses Projekt; sonst read-only.
+Ersetzt bewusst den 6.4/Codex-P3-„OAuth hat nie eine Bindung"-Pfad durch eine
+**explizite, owner-gesetzte Einzelprojekt-Bindung** (nicht „schreibt überall").
+Der statische Pfad (`static:<project>` + `journal:write`) ist unverändert.
+
+Restrisiko: `revoke_token` löscht den Grant nicht (Grant persistiert bis
+Re-Consent) – für v1 akzeptiert. Optional später: Projekt-Whitelist statt
+Freitext.
 
 ## Endpoints / Discovery (am Root)
 

@@ -34,8 +34,10 @@ admin UI.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
+import re
 import secrets
 from pathlib import Path
 from typing import Any
@@ -54,8 +56,11 @@ from bramble.admin_auth import (
 )
 from bramble.consent_store import ConsentApprovalStore
 from bramble.oauth_config import OAuthConfig
+from bramble.oauth_store import OAuthStore
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates" / "oauth"
+# Same kebab-case project identifier the journal uses.
+_KEBAB_CASE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +90,8 @@ class OAuthOwnerGate:
         templates: Environment,
         cookie_secure: bool,
         cookie_max_age: int,
+        store: OAuthStore,
+        allow_write: bool = False,
     ) -> None:
         self.app = app
         self._authenticator = authenticator
@@ -94,6 +101,8 @@ class OAuthOwnerGate:
         self._templates = templates
         self._cookie_secure = cookie_secure
         self._cookie_max_age = cookie_max_age
+        self._store = store
+        self._allow_write = allow_write
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] != "http":
@@ -195,6 +204,31 @@ class OAuthOwnerGate:
                 status_code=200,
             )
 
+        # Record the owner's write grant for this connector (keyed by
+        # client_id). Honoured only when write is enabled; an empty project
+        # (or write disabled) records an explicit read-only grant, so a
+        # re-consent can also downgrade a previous write grant.
+        client_id = params.get("client_id", "")
+        project = (form.get("project") or "").strip()
+        if self._allow_write and project:
+            if not _KEBAB_CASE_RE.match(project):
+                return self._render_consent(
+                    session,
+                    authorize_query,
+                    params,
+                    error=f"Invalid project name {project!r} – use kebab-case.",
+                )
+            can_write, grant_project = True, project
+        else:
+            can_write, grant_project = False, None
+        if client_id:
+            await asyncio.to_thread(
+                self._store.save_client_grant,
+                client_id,
+                project=grant_project,
+                can_write=can_write,
+            )
+
         self._approvals.approve(
             session_id=self._sid(request), fingerprint=self._fingerprint(params)
         )
@@ -215,7 +249,12 @@ class OAuthOwnerGate:
         return HTMLResponse(html, status_code=status)
 
     def _render_consent(
-        self, session: AdminSession, authorize_query: str, params: dict[str, str]
+        self,
+        session: AdminSession,
+        authorize_query: str,
+        params: dict[str, str],
+        *,
+        error: str | None = None,
     ) -> Response:
         html = self._templates.get_template("consent.html").render(
             csrf_token=session.csrf_token,
@@ -223,8 +262,10 @@ class OAuthOwnerGate:
             client_id=params.get("client_id", ""),
             redirect_uri=params.get("redirect_uri", ""),
             scope=params.get("scope", ""),
+            allow_write=self._allow_write,
+            error=error,
         )
-        return HTMLResponse(html, status_code=200)
+        return HTMLResponse(html, status_code=200 if error is None else 400)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -309,13 +350,14 @@ def build_owner_templates() -> Environment:
     )
 
 
-def build_owner_gate(config: OAuthConfig) -> Middleware:
+def build_owner_gate(config: OAuthConfig, store: OAuthStore) -> Middleware:
     """Construct the ASGI gate middleware from an :class:`OAuthConfig`.
 
     Loads the dedicated owner secret (fails fast if it is missing — OAuth
     must not run without an owner credential) and wires the reused
-    admin-auth primitives. Returns a Starlette ``Middleware`` ready to hand
-    to ``http_app(middleware=[...])``.
+    admin-auth primitives plus the ``OAuthStore`` (for write grants).
+    Returns a Starlette ``Middleware`` ready to hand to
+    ``http_app(middleware=[...])``.
     """
 
     authenticator = AdminAuthenticator(config.owner_secret_file)
@@ -336,6 +378,8 @@ def build_owner_gate(config: OAuthConfig) -> Middleware:
         templates=build_owner_templates(),
         cookie_secure=config.owner_cookie_secure,
         cookie_max_age=config.owner_session_idle_seconds,
+        store=store,
+        allow_write=config.allow_oauth_write,
     )
 
 

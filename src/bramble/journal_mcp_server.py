@@ -400,8 +400,11 @@ class _PrincipalRateLimitMiddleware(Middleware):
     (free of FastMCP types) so it is unit-testable in-process.
     """
 
-    def __init__(self, rate_limiter: RateLimiter) -> None:
+    def __init__(self, rate_limiter: RateLimiter, *, grant_store: Any = None) -> None:
         self._rate_limiter = rate_limiter
+        # OAuthStore (or any object with get_client_grant); consulted only for
+        # OAuth write tools to find the owner's per-connector write grant.
+        self._grant_store = grant_store
 
     async def on_call_tool(
         self, context: MiddlewareContext, call_next: CallNext
@@ -409,8 +412,26 @@ class _PrincipalRateLimitMiddleware(Middleware):
         principal = get_access_token()
         client_ip = self._client_ip()
         tool_name = getattr(context.message, "name", "") or ""
+
+        # Only OAuth write tools need a grant lookup; reads (the common case)
+        # and the static path skip the DB hit.
+        grant = None
+        client_id = getattr(principal, "client_id", "") or ""
+        if (
+            tool_name in _WRITE_TOOLS
+            and self._grant_store is not None
+            and client_id
+            and not client_id.startswith(STATIC_CLIENT_PREFIX)
+        ):
+            grant = await asyncio.to_thread(
+                self._grant_store.get_client_grant, client_id
+            )
+
         project = self._authorize(
-            principal=principal, client_ip=client_ip, tool_name=tool_name
+            principal=principal,
+            client_ip=client_ip,
+            tool_name=tool_name,
+            grant=grant,
         )
         reset = _token_project.set(project)
         try:
@@ -427,15 +448,20 @@ class _PrincipalRateLimitMiddleware(Middleware):
         return _resolve_client_ip(request)
 
     def _authorize(
-        self, *, principal: Any, client_ip: str, tool_name: str
+        self,
+        *,
+        principal: Any,
+        client_ip: str,
+        tool_name: str,
+        grant: Any = None,
     ) -> str | None:
         """Apply rate-limit + scope policy; return the bound project or None.
 
-        Takes the already-resolved principal (an ``AccessToken`` or
-        ``None``) so it can be unit-tested without a live request. The
-        per-IP limit is the backstop applied first; then the principal is
-        required; then the per-principal limit, the write gate and the
-        project binding.
+        Takes the already-resolved principal (an ``AccessToken`` or ``None``)
+        and the looked-up owner ``grant`` (or ``None``) so it can be
+        unit-tested without a live request. The per-IP limit is the backstop
+        applied first; then the principal is required; then the per-principal
+        limit and the write gate.
         """
 
         if not self._rate_limiter.allow_ip(client_ip):
@@ -448,25 +474,27 @@ class _PrincipalRateLimitMiddleware(Middleware):
         if not self._rate_limiter.allow_project(principal_key):
             raise ToolError("rate limit exceeded; slow down")
 
-        # Derive the project binding first: only a static principal
-        # ("static:<project>") carries one; OAuth principals get None.
         client_id = getattr(principal, "client_id", None) or ""
-        project = (
-            client_id[len(STATIC_CLIENT_PREFIX) :]
-            if client_id.startswith(STATIC_CLIENT_PREFIX)
-            else None
-        )
+        if client_id.startswith(STATIC_CLIENT_PREFIX):
+            # Static token: bound to its project, carries journal:write.
+            project: str | None = client_id[len(STATIC_CLIENT_PREFIX) :]
+            can_write = _WRITE_SCOPE in set(getattr(principal, "scopes", None) or ())
+        elif grant is not None and grant.can_write and grant.project:
+            # OAuth token with an explicit owner write grant for one project.
+            project = grant.project
+            can_write = True
+        else:
+            # OAuth token without a write grant: read-only, no binding.
+            project = None
+            can_write = False
 
-        # A write tool requires BOTH the journal:write scope AND a project
-        # binding. Requiring the binding closes a hole: if an operator adds
-        # journal:write to BRAMBLE_OAUTH_SCOPES, an OAuth principal would have
-        # the scope but project=None, and _enforce_project_scope treats None as
-        # unrestricted – letting it write to any project. No project => no write.
-        scopes = set(getattr(principal, "scopes", None) or ())
-        if tool_name in _WRITE_TOOLS and (_WRITE_SCOPE not in scopes or project is None):
+        # A write tool needs both write capability AND a project binding. For
+        # OAuth that comes solely from the owner's per-connector grant, so a
+        # client can never escalate on its own and never writes unbound.
+        if tool_name in _WRITE_TOOLS and not (can_write and project):
             raise ToolError(
-                f"this token is read-only; {tool_name} requires write access "
-                "bound to a project"
+                f"this token is read-only; {tool_name} requires an owner-granted "
+                "write authorization bound to a project"
             )
         return project
 
@@ -507,6 +535,7 @@ class JournalMCPServer:
         rate_limiter: RateLimiter | None = None,
         auth_provider: AuthProvider | None = None,
         http_middleware: list[Any] | None = None,
+        oauth_grant_store: Any = None,
     ) -> None:
         if not isinstance(db, JournalDB):
             raise TypeError("db must be a JournalDB instance")
@@ -532,6 +561,7 @@ class JournalMCPServer:
         # ASGI middleware (e.g. the OAuth owner-login gate) attached to the
         # served http app. Empty for stdio / the legacy static-http path.
         self._http_middleware: list[Any] = list(http_middleware or [])
+        self._oauth_grant_store = oauth_grant_store
 
         app_kwargs: dict[str, Any] = {
             "name": "bramble",
@@ -555,7 +585,11 @@ class JournalMCPServer:
         self._app = FastMCP(**app_kwargs)
         self._register_tools()
         if auth_provider is not None and rate_limiter is not None:
-            self._app.add_middleware(_PrincipalRateLimitMiddleware(rate_limiter))
+            self._app.add_middleware(
+                _PrincipalRateLimitMiddleware(
+                    rate_limiter, grant_store=oauth_grant_store
+                )
+            )
         elif auth_validator is not None and rate_limiter is not None:
             self._app.add_middleware(
                 _AuthRateLimitMiddleware(auth_validator, rate_limiter)

@@ -51,6 +51,11 @@ _DEFAULT_OWNER_LOGIN_MAX_ATTEMPTS = 5
 _DEFAULT_OWNER_LOGIN_WINDOW_SECONDS = 300  # 5 min
 _DEFAULT_OWNER_COOKIE_SECURE = True
 
+# Phase 6.7: master switch for OAuth write. Off by default (the OAuth path is
+# read-only). When on, the consent screen lets the owner grant a connector
+# write access to one chosen project; the grant is stored per client_id.
+_DEFAULT_ALLOW_OAUTH_WRITE = False
+
 # Hosts for which a plain-http base URL is tolerated (local development and
 # the in-process test client). Any other host must use https – Claude will
 # not talk OAuth to a non-TLS connector, and tokens must not cross the wire
@@ -75,6 +80,7 @@ ENV_OAUTH_OWNER_SESSION_ABSOLUTE_SECONDS = "BRAMBLE_OAUTH_OWNER_SESSION_ABSOLUTE
 ENV_OAUTH_OWNER_LOGIN_MAX_ATTEMPTS = "BRAMBLE_OAUTH_OWNER_LOGIN_MAX_ATTEMPTS"
 ENV_OAUTH_OWNER_LOGIN_WINDOW_SECONDS = "BRAMBLE_OAUTH_OWNER_LOGIN_WINDOW_SECONDS"
 ENV_OAUTH_OWNER_COOKIE_SECURE = "BRAMBLE_OAUTH_OWNER_COOKIE_SECURE"
+ENV_OAUTH_ALLOW_WRITE = "BRAMBLE_OAUTH_ALLOW_WRITE"
 
 _TRUE_TOKENS: frozenset[str] = frozenset({"1", "true", "yes", "on"})
 _FALSE_TOKENS: frozenset[str] = frozenset({"0", "false", "no", "off"})
@@ -139,6 +145,7 @@ class OAuthConfig:
     owner_login_max_attempts: int = _DEFAULT_OWNER_LOGIN_MAX_ATTEMPTS
     owner_login_window_seconds: int = _DEFAULT_OWNER_LOGIN_WINDOW_SECONDS
     owner_cookie_secure: bool = _DEFAULT_OWNER_COOKIE_SECURE
+    allow_oauth_write: bool = _DEFAULT_ALLOW_OAUTH_WRITE
 
     def __post_init__(self) -> None:
         self._validate_public_base_url()
@@ -269,6 +276,8 @@ class OAuthConfig:
             raise TypeError("owner_secret_file must be a pathlib.Path")
         if not isinstance(self.owner_cookie_secure, bool):
             raise TypeError("owner_cookie_secure must be a bool")
+        if not isinstance(self.allow_oauth_write, bool):
+            raise TypeError("allow_oauth_write must be a bool")
         for name, value in (
             ("owner_session_idle_seconds", self.owner_session_idle_seconds),
             ("owner_session_absolute_seconds", self.owner_session_absolute_seconds),
@@ -402,6 +411,11 @@ class OAuthConfig:
                 environ.get(ENV_OAUTH_OWNER_COOKIE_SECURE),
                 default=_DEFAULT_OWNER_COOKIE_SECURE,
                 field_name="owner_cookie_secure",
+            ),
+            allow_oauth_write=_parse_bool(
+                environ.get(ENV_OAUTH_ALLOW_WRITE),
+                default=_DEFAULT_ALLOW_OAUTH_WRITE,
+                field_name="allow_oauth_write",
             ),
         )
 

@@ -9,6 +9,7 @@ import pytest
 
 from bramble.oauth_config import (
     ENV_OAUTH_ACCESS_TOKEN_TTL,
+    ENV_OAUTH_ALLOW_WRITE,
     ENV_OAUTH_AUTH_CODE_TTL,
     ENV_OAUTH_DB_PATH,
     ENV_OAUTH_ENABLE_DCR,
@@ -282,6 +283,17 @@ class TestOwnerGate:
         assert cfg.owner_session_absolute_seconds == 28_800
         assert cfg.owner_login_max_attempts == 5
         assert cfg.owner_cookie_secure is True
+        assert cfg.allow_oauth_write is False  # read-only by default
+
+    def test_allow_write_must_be_bool(self) -> None:
+        with pytest.raises(TypeError):
+            OAuthConfig(public_base_url=_BASE, allow_oauth_write="yes")  # type: ignore[arg-type]
+
+    def test_allow_write_from_env(self) -> None:
+        cfg = OAuthConfig.from_env(
+            env={ENV_OAUTH_PUBLIC_BASE_URL: _BASE, ENV_OAUTH_ALLOW_WRITE: "true"}
+        )
+        assert cfg.allow_oauth_write is True
 
     def test_absolute_must_be_at_least_idle(self) -> None:
         with pytest.raises(ValueError, match="absolute"):

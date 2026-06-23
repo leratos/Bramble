@@ -17,6 +17,7 @@ from bramble.admin_auth import (
 )
 from bramble.consent_store import ConsentApprovalStore
 from bramble.oauth_owner_gate import OAuthOwnerGate, build_owner_templates
+from bramble.oauth_store import OAuthStore
 
 _USER = "owner"
 _PASS = "correct-horse-battery"
@@ -50,7 +51,11 @@ def _secret_file(tmp_path: Path) -> Path:
     return p
 
 
-def _build_gate(tmp_path: Path, *, max_attempts: int = 5) -> OAuthOwnerGate:
+def _build_gate(
+    tmp_path: Path, *, max_attempts: int = 5, allow_write: bool = False
+) -> OAuthOwnerGate:
+    store = OAuthStore(tmp_path / "oauth.db")
+    store.initialize()
     return OAuthOwnerGate(
         _inner,
         authenticator=AdminAuthenticator(_secret_file(tmp_path)),
@@ -62,6 +67,8 @@ def _build_gate(tmp_path: Path, *, max_attempts: int = 5) -> OAuthOwnerGate:
         templates=build_owner_templates(),
         cookie_secure=False,  # the test client speaks http
         cookie_max_age=900,
+        store=store,
+        allow_write=allow_write,
     )
 
 
@@ -214,3 +221,65 @@ class TestConsentFlow:
                 "&scope=journal:read&code_challenge=abc"
             )
         assert other.text != "DELEGATED"
+
+
+class TestWriteGrant:
+    async def _consent(self, c, **extra) -> httpx.Response:
+        await _login(c)
+        consent = await c.get(_AUTHZ)
+        data = {
+            "csrf_token": _hidden(consent.text, "csrf_token"),
+            "authorize_query": _hidden(consent.text, "authorize_query"),
+            "decision": "approve",
+        }
+        data.update(extra)
+        return await c.post("/oauth/consent", data=data)
+
+    async def test_project_field_shown_only_when_write_enabled(
+        self, tmp_path: Path
+    ) -> None:
+        async with _client(_build_gate(tmp_path, allow_write=True)) as c:
+            await _login(c)
+            assert 'name="project"' in (await c.get(_AUTHZ)).text
+        async with _client(_build_gate(tmp_path)) as c2:
+            await _login(c2)
+            assert 'name="project"' not in (await c2.get(_AUTHZ)).text
+
+    async def test_consent_with_project_saves_write_grant(
+        self, tmp_path: Path
+    ) -> None:
+        gate = _build_gate(tmp_path, allow_write=True)
+        async with _client(gate) as c:
+            r = await self._consent(c, project="bramble")
+        assert r.status_code == 303
+        grant = gate._store.get_client_grant("claude")
+        assert grant is not None
+        assert grant.can_write is True
+        assert grant.project == "bramble"
+
+    async def test_consent_without_project_is_read_only(self, tmp_path: Path) -> None:
+        gate = _build_gate(tmp_path, allow_write=True)
+        async with _client(gate) as c:
+            await self._consent(c, project="")
+        grant = gate._store.get_client_grant("claude")
+        assert grant is not None
+        assert grant.can_write is False
+        assert grant.project is None
+
+    async def test_invalid_project_rejected(self, tmp_path: Path) -> None:
+        gate = _build_gate(tmp_path, allow_write=True)
+        async with _client(gate) as c:
+            r = await self._consent(c, project="Not Kebab")
+        assert r.status_code == 400
+        assert "Invalid project" in r.text
+        assert gate._store.get_client_grant("claude") is None  # nothing saved
+
+    async def test_write_ignored_when_master_switch_off(self, tmp_path: Path) -> None:
+        # Even a posted project must not yield a write grant when allow_write
+        # is off (read-only is the safe default).
+        gate = _build_gate(tmp_path, allow_write=False)
+        async with _client(gate) as c:
+            await self._consent(c, project="bramble")
+        grant = gate._store.get_client_grant("claude")
+        assert grant is not None
+        assert grant.can_write is False

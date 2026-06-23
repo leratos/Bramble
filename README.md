@@ -172,7 +172,10 @@ Claude Web/Mobile custom connectors only speak OAuth, so the HTTP transport
 can optionally run a self-hosted OAuth 2.1 Authorization Server in front of
 `/mcp`. It is **off by default**; enabling it does not change the existing
 static-bearer path, which keeps working through the same endpoint (both are
-accepted via `MultiAuth`). The OAuth path is read-only (scope `journal:read`).
+accepted via `MultiAuth`). The OAuth path reads across all projects; **write**
+is off unless `BRAMBLE_OAUTH_ALLOW_WRITE=true`, in which case the owner picks —
+on the consent screen — the one project a connector may write to (the grant is
+stored per client and enforced by the MCP-layer middleware).
 
 Enable it by setting `BRAMBLE_ENABLE_OAUTH=true` plus:
 
@@ -186,6 +189,7 @@ Enable it by setting `BRAMBLE_ENABLE_OAUTH=true` plus:
 | `BRAMBLE_OAUTH_REFRESH_TOKEN_TTL` | `2592000` | seconds; `none` for no expiry |
 | `BRAMBLE_OAUTH_AUTH_CODE_TTL` | `300` | seconds |
 | `BRAMBLE_OAUTH_OWNER_SECRET_FILE` | `./secrets/oauth-owner.json` | dedicated owner-login Argon2id secret |
+| `BRAMBLE_OAUTH_ALLOW_WRITE` | `false` | allow per-connector write to one owner-chosen project |
 
 Tokens are opaque (no signing key) and persisted in `oauth.db`. Claude usually
 self-registers via DCR; a confidential fallback client can be provisioned with

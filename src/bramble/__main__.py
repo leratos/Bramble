@@ -63,12 +63,13 @@ def main() -> None:
             # and a static-token verifier inside the same MultiAuth keeps the
             # legacy bearer path working (Phase-6 decision D3/D4). The owner
             # gate (Phase 6.6) authenticates the resource owner on /authorize.
-            auth_provider, http_middleware = _build_oauth_stack(config)
+            auth_provider, http_middleware, grant_store = _build_oauth_stack(config)
             server = JournalMCPServer(
                 db,
                 auth_provider=auth_provider,
                 rate_limiter=rate_limiter,
                 http_middleware=http_middleware,
+                oauth_grant_store=grant_store,
             )
             logger.info("OAuth authorization server enabled for http transport")
         else:
@@ -80,13 +81,15 @@ def main() -> None:
 
 
 def _build_oauth_stack(config: ServerConfig):
-    """Build the Phase-6 OAuth auth provider and the http gate middleware.
+    """Build the Phase-6 OAuth auth provider, http gate middleware and store.
 
-    Returns ``(auth_provider, http_middleware)`` where ``auth_provider`` is a
-    ``MultiAuth`` (self-hosted AS + static-token verifier) and
-    ``http_middleware`` is the resource-owner login/consent gate on
-    ``/authorize`` (Phase 6.6). OAuth-specific modules are imported lazily so
-    the common stdio / static-http paths never pull them in.
+    Returns ``(auth_provider, http_middleware, grant_store)`` where
+    ``auth_provider`` is a ``MultiAuth`` (self-hosted AS + static-token
+    verifier), ``http_middleware`` is the resource-owner login/consent gate on
+    ``/authorize`` (Phase 6.6/6.7), and ``grant_store`` is the ``OAuthStore``
+    the MCP-layer middleware consults for owner write grants. OAuth-specific
+    modules are imported lazily so the common stdio / static-http paths never
+    pull them in.
     ``OAuthConfig.from_env`` raises if the required public base URL is missing,
     and the owner gate raises if the owner secret file is absent — both the
     right fail-fast behaviour once OAuth has been switched on.
@@ -139,8 +142,8 @@ def _build_oauth_stack(config: ServerConfig):
         verifiers=[static_verifier],
         base_url=oauth_config.public_base_url,
     )
-    owner_gate = build_owner_gate(oauth_config)
-    return auth_provider, [owner_gate]
+    owner_gate = build_owner_gate(oauth_config, store)
+    return auth_provider, [owner_gate], store
 
 
 if __name__ == "__main__":

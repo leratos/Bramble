@@ -50,6 +50,11 @@ Environment=BRAMBLE_OAUTH_DB_PATH=/opt/bramble/data/oauth.db
 # The server refuses to start in OAuth mode if this file is missing.
 Environment=BRAMBLE_OAUTH_OWNER_SECRET_FILE=/opt/bramble/secrets/oauth-owner.json
 
+# Phase 6.7: allow OAuth connectors to WRITE. Off by default (read-only). When
+# true, the owner picks the one writable project per connector on the consent
+# screen; reads stay cross-project. Enable only where write-from-web is wanted.
+Environment=BRAMBLE_OAUTH_ALLOW_WRITE=false
+
 # Confidential static client secret (the DCR fallback) and any other OAuth
 # secrets live here, never in the repo. The leading '-' makes the file
 # optional, so a DCR-only deployment needs none. Create it with
