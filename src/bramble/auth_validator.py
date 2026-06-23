@@ -80,15 +80,29 @@ class AuthValidator:
         so Fail2Ban can act on it. A hit is silent.
         """
 
-        if token:
-            project = self._project_by_hash.get(_hash_token(token))
-            if project is not None:
-                return project
+        project = self.resolve_project(token)
+        if project is None:
+            logger.warning(
+                "authentication failed",
+                extra={"event": AUTH_FAILED_EVENT, "client_ip": client_ip},
+            )
+        return project
 
-        logger.warning(
-            "authentication failed",
-            extra={"event": AUTH_FAILED_EVENT, "client_ip": client_ip},
-        )
+    def resolve_project(self, token: str | None) -> str | None:
+        """Resolve a token to its project without logging (silent lookup).
+
+        Unlike :meth:`authenticate`, a miss is *not* logged as
+        ``auth_failed``. This is for the Phase-6 OAuth ``MultiAuth`` path:
+        a token this static map does not recognise may still be a valid
+        OAuth access token that another verifier accepts, so logging it as
+        a failure here would mislabel legitimate OAuth tokens and could
+        trip Fail2Ban (maxretry) against real users. The genuine
+        all-verifiers-failed signal is handled at the auth-middleware /
+        proxy layer instead.
+        """
+
+        if token:
+            return self._project_by_hash.get(_hash_token(token))
         return None
 
     # ------------------------------------------------------------------

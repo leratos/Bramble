@@ -136,6 +136,32 @@ class TestAuthenticate:
 
 
 # ---------------------------------------------------------------------------
+# resolve_project() – silent lookup for the OAuth MultiAuth path
+# ---------------------------------------------------------------------------
+class TestResolveProject:
+    def test_valid_token_resolves_project(self, tokens_file: Path) -> None:
+        validator = AuthValidator(tokens_file)
+        assert validator.resolve_project("tok-bramble") == "bramble"
+
+    @pytest.mark.parametrize("token", ["wrong", None, ""])
+    def test_miss_returns_none(self, tokens_file: Path, token: str | None) -> None:
+        validator = AuthValidator(tokens_file)
+        assert validator.resolve_project(token) is None
+
+    def test_miss_is_silent(
+        self, tokens_file: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # A miss must NOT emit auth_failed: MultiAuth may try this verifier
+        # with a valid OAuth token, and Fail2Ban must not ban that user.
+        validator = AuthValidator(tokens_file)
+        with caplog.at_level(logging.WARNING, logger="bramble.auth_validator"):
+            validator.resolve_project("some-oauth-token")
+        assert not [
+            r for r in caplog.records if getattr(r, "event", None) == AUTH_FAILED_EVENT
+        ]
+
+
+# ---------------------------------------------------------------------------
 # Token hashing
 # ---------------------------------------------------------------------------
 class TestHashing:

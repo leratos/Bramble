@@ -32,6 +32,36 @@ Environment=BRAMBLE_RATE_LIMIT_PER_TOKEN=60
 Environment=BRAMBLE_RATE_LIMIT_PER_IP=120
 Environment=FASTMCP_ENV_FILE=/opt/bramble/nonexistent.env
 
+# Phase 6: self-hosted OAuth 2.1 Authorization Server for the Claude
+# Web/Mobile custom connector. Disabled by default: flip
+# BRAMBLE_ENABLE_OAUTH to true only AFTER the IT/Compliance gate (journal
+# bramble#658) is cleared, then `systemctl restart bramble`. With it false
+# the http transport stays exactly the Phase-3 static-bearer path, so the
+# local bearer path keeps working unchanged.
+Environment=BRAMBLE_ENABLE_OAUTH=false
+Environment=BRAMBLE_OAUTH_PUBLIC_BASE_URL=https://journal.last-strawberry.com
+Environment=BRAMBLE_OAUTH_DB_PATH=/opt/bramble/data/oauth.db
+
+# Resource-owner gate (Phase 6.6): /authorize requires the owner to log in
+# and consent before a code is issued. A DEDICATED Argon2id secret, separate
+# from the SSH-tunnelled admin UI. Create it (mode 600, owned by bramble):
+#   python scripts/gen_admin_secret.py \
+#       --output /opt/bramble/secrets/oauth-owner.json --username owner
+# The server refuses to start in OAuth mode if this file is missing.
+Environment=BRAMBLE_OAUTH_OWNER_SECRET_FILE=/opt/bramble/secrets/oauth-owner.json
+
+# Phase 6.7: allow OAuth connectors to WRITE. Off by default (read-only). When
+# true, the owner picks the one writable project per connector on the consent
+# screen; reads stay cross-project. Enable only where write-from-web is wanted.
+Environment=BRAMBLE_OAUTH_ALLOW_WRITE=false
+
+# Confidential static client secret (the DCR fallback) and any other OAuth
+# secrets live here, never in the repo. The leading '-' makes the file
+# optional, so a DCR-only deployment needs none. Create it with
+# scripts/gen_oauth_client.py (mode 600, owned by the bramble user); it sets
+# BRAMBLE_OAUTH_STATIC_CLIENT_ID / _SECRET / _REDIRECT_URIS.
+EnvironmentFile=-/opt/bramble/secrets/oauth.env
+
 # Hardening. The process only ever needs to read its code, venv and
 # token file and to write the SQLite database (+ its WAL sidecars);
 # logs go to stderr -> journald, so no log directory is required.

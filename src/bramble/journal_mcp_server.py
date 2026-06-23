@@ -28,7 +28,12 @@ from typing import Any
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
-from fastmcp.server.dependencies import get_http_headers, get_http_request
+from fastmcp.server.auth import AuthProvider
+from fastmcp.server.dependencies import (
+    get_access_token,
+    get_http_headers,
+    get_http_request,
+)
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 
 from bramble.agent_guide import AGENT_GUIDE, AGENT_GUIDE_VERSION
@@ -40,6 +45,7 @@ from bramble.journal_entry import JournalEntry, JournalStatus
 from bramble.mcp_errors import translate_errors
 from bramble.open_item import OpenItemView
 from bramble.rate_limiter import RateLimiter
+from bramble.static_token_verifier import STATIC_CLIENT_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -360,6 +366,153 @@ class _AuthRateLimitMiddleware(Middleware):
         return project
 
 
+# Tools that mutate the journal. The OAuth path is read-only (Phase-6
+# decision D3): a principal whose scopes lack ``journal:write`` may not call
+# these. Static tokens carry journal:write and keep their write capability.
+_WRITE_TOOLS: frozenset[str] = frozenset({"journal_append", "journal_resolve"})
+
+# The scope a principal must hold to call a write tool.
+_WRITE_SCOPE = "journal:write"
+
+
+class _PrincipalRateLimitMiddleware(Middleware):
+    """Rate-limit + scope policy for the OAuth (``MultiAuth``) http mode.
+
+    When the server is built with an ``auth_provider`` (FastMCP native
+    auth), the bearer token is validated at the ASGI layer and the
+    authenticated principal is exposed via
+    :func:`~fastmcp.server.dependencies.get_access_token`. This tool
+    middleware enforces the Bramble-specific policy the framework does
+    not:
+
+    * per-IP and per-principal rate limits;
+    * the read-only gate – an OAuth principal (no ``journal:write`` scope)
+      cannot call a write tool, while static tokens may;
+    * the project write-scope binding – a static token is bound to its
+      project (``client_id == "static:<project>"``) so ``journal_append``
+      can only write there. OAuth principals carry no project binding and
+      cannot write anyway.
+
+    A request that reaches the tool layer with no principal is refused
+    (defence in depth): on the real http path the ASGI auth gate fails
+    such a request before it gets here, so this guards the in-process and
+    misconfiguration cases. The decision logic lives in :meth:`_authorize`
+    (free of FastMCP types) so it is unit-testable in-process.
+    """
+
+    def __init__(
+        self,
+        rate_limiter: RateLimiter,
+        *,
+        grant_store: Any = None,
+        allow_write: bool = False,
+    ) -> None:
+        self._rate_limiter = rate_limiter
+        # OAuthStore (or any object with get_client_grant); consulted only for
+        # OAuth write tools to find the owner's per-connector write grant.
+        self._grant_store = grant_store
+        # The OAuth write master switch. When off, OAuth principals are
+        # read-only regardless of any stored grant – so flipping the switch
+        # back to false (rollback / incident response) immediately stops
+        # previously authorized connectors from writing.
+        self._allow_write = allow_write
+
+    async def on_call_tool(
+        self, context: MiddlewareContext, call_next: CallNext
+    ) -> Any:
+        principal = get_access_token()
+        client_ip = self._client_ip()
+        tool_name = getattr(context.message, "name", "") or ""
+
+        # Only OAuth write tools need a grant lookup; reads (the common case)
+        # and the static path skip the DB hit.
+        grant = None
+        client_id = getattr(principal, "client_id", "") or ""
+        if (
+            tool_name in _WRITE_TOOLS
+            and self._allow_write
+            and self._grant_store is not None
+            and client_id
+            and not client_id.startswith(STATIC_CLIENT_PREFIX)
+        ):
+            grant = await asyncio.to_thread(
+                self._grant_store.get_client_grant, client_id
+            )
+
+        project = self._authorize(
+            principal=principal,
+            client_ip=client_ip,
+            tool_name=tool_name,
+            grant=grant,
+        )
+        reset = _token_project.set(project)
+        try:
+            return await call_next(context)
+        finally:
+            _token_project.reset(reset)
+
+    @staticmethod
+    def _client_ip() -> str:
+        try:
+            request = get_http_request()
+        except RuntimeError:
+            return "unknown"
+        return _resolve_client_ip(request)
+
+    def _authorize(
+        self,
+        *,
+        principal: Any,
+        client_ip: str,
+        tool_name: str,
+        grant: Any = None,
+    ) -> str | None:
+        """Apply rate-limit + scope policy; return the bound project or None.
+
+        Takes the already-resolved principal (an ``AccessToken`` or ``None``)
+        and the looked-up owner ``grant`` (or ``None``) so it can be
+        unit-tested without a live request. The per-IP limit is the backstop
+        applied first; then the principal is required; then the per-principal
+        limit and the write gate.
+        """
+
+        if not self._rate_limiter.allow_ip(client_ip):
+            raise ToolError("rate limit exceeded; slow down")
+        if principal is None:
+            raise ToolError(
+                "authentication required: missing or invalid bearer token"
+            )
+        principal_key = getattr(principal, "client_id", None) or "unknown"
+        if not self._rate_limiter.allow_project(principal_key):
+            raise ToolError("rate limit exceeded; slow down")
+
+        client_id = getattr(principal, "client_id", None) or ""
+        if client_id.startswith(STATIC_CLIENT_PREFIX):
+            # Static token: bound to its project, carries journal:write.
+            project: str | None = client_id[len(STATIC_CLIENT_PREFIX) :]
+            can_write = _WRITE_SCOPE in set(getattr(principal, "scopes", None) or ())
+        elif self._allow_write and grant is not None and grant.can_write and grant.project:
+            # OAuth token with an explicit owner write grant for one project,
+            # and the write master switch is currently on. Checking the switch
+            # here too means flipping it off ignores stored grants immediately.
+            project = grant.project
+            can_write = True
+        else:
+            # OAuth token without a write grant: read-only, no binding.
+            project = None
+            can_write = False
+
+        # A write tool needs both write capability AND a project binding. For
+        # OAuth that comes solely from the owner's per-connector grant, so a
+        # client can never escalate on its own and never writes unbound.
+        if tool_name in _WRITE_TOOLS and not (can_write and project):
+            raise ToolError(
+                f"this token is read-only; {tool_name} requires an owner-granted "
+                "write authorization bound to a project"
+            )
+        return project
+
+
 class JournalMCPServer:
     """MCP-facing server that exposes :class:`JournalDB` operations.
 
@@ -370,10 +523,22 @@ class JournalMCPServer:
         already be initialised (``db.initialize()`` was called).
     auth_validator:
         Resolves bearer tokens to projects. Supply together with
-        ``rate_limiter`` to gate the ``http`` transport; leave unset
-        for ``stdio``. Providing only one of the two raises.
+        ``rate_limiter`` to gate the ``http`` transport with the Phase-3
+        static-bearer path; leave unset for ``stdio``. Providing only one
+        of the two raises. Mutually exclusive with ``auth_provider``.
     rate_limiter:
-        Token-bucket request limiter. See ``auth_validator``.
+        Token-bucket request limiter. Required by both the static-bearer
+        path (with ``auth_validator``) and the OAuth path (with
+        ``auth_provider``).
+    auth_provider:
+        A FastMCP :class:`AuthProvider` (Phase-6: a ``MultiAuth`` wrapping
+        the self-hosted OAuth AS plus a static-token verifier). When
+        supplied, it is handed to ``FastMCP(auth=...)`` so the framework
+        mounts the discovery / ``/authorize`` / ``/token`` / ``/register``
+        routes and gates ``/mcp`` at the ASGI layer; a
+        :class:`_PrincipalRateLimitMiddleware` then enforces rate limits,
+        the read-only gate and the project binding. Requires
+        ``rate_limiter`` and is mutually exclusive with ``auth_validator``.
     """
 
     def __init__(
@@ -382,10 +547,23 @@ class JournalMCPServer:
         *,
         auth_validator: AuthValidator | None = None,
         rate_limiter: RateLimiter | None = None,
+        auth_provider: AuthProvider | None = None,
+        http_middleware: list[Any] | None = None,
+        oauth_grant_store: Any = None,
+        oauth_allow_write: bool = False,
     ) -> None:
         if not isinstance(db, JournalDB):
             raise TypeError("db must be a JournalDB instance")
-        if (auth_validator is None) != (rate_limiter is None):
+        if auth_provider is not None:
+            if auth_validator is not None:
+                raise ValueError(
+                    "auth_provider is mutually exclusive with auth_validator: "
+                    "in the OAuth mode the static-token path lives inside the "
+                    "provider (MultiAuth verifier), not a separate validator"
+                )
+            if rate_limiter is None:
+                raise ValueError("auth_provider requires a rate_limiter")
+        elif (auth_validator is None) != (rate_limiter is None):
             raise ValueError(
                 "auth_validator and rate_limiter must be provided together: "
                 "both for the authenticated http transport, or neither"
@@ -394,10 +572,16 @@ class JournalMCPServer:
         self._db = db
         self._auth_validator = auth_validator
         self._rate_limiter = rate_limiter
+        self._auth_provider = auth_provider
+        # ASGI middleware (e.g. the OAuth owner-login gate) attached to the
+        # served http app. Empty for stdio / the legacy static-http path.
+        self._http_middleware: list[Any] = list(http_middleware or [])
+        self._oauth_grant_store = oauth_grant_store
+        self._oauth_allow_write = oauth_allow_write
 
-        self._app: FastMCP = FastMCP(
-            name="bramble",
-            instructions=(
+        app_kwargs: dict[str, Any] = {
+            "name": "bramble",
+            "instructions": (
                 "Shared development journal across projects. "
                 "At session start, first call journal_guide for the "
                 "canonical, project-agnostic working conventions "
@@ -411,9 +595,20 @@ class JournalMCPServer:
                 "snapshots, journal_resolve to close open items via "
                 "resolves links, and journal_list_projects for an overview."
             ),
-        )
+        }
+        if auth_provider is not None:
+            app_kwargs["auth"] = auth_provider
+        self._app = FastMCP(**app_kwargs)
         self._register_tools()
-        if auth_validator is not None and rate_limiter is not None:
+        if auth_provider is not None and rate_limiter is not None:
+            self._app.add_middleware(
+                _PrincipalRateLimitMiddleware(
+                    rate_limiter,
+                    grant_store=oauth_grant_store,
+                    allow_write=oauth_allow_write,
+                )
+            )
+        elif auth_validator is not None and rate_limiter is not None:
             self._app.add_middleware(
                 _AuthRateLimitMiddleware(auth_validator, rate_limiter)
             )
@@ -820,7 +1015,16 @@ class JournalMCPServer:
                 "starting MCP server on http",
                 extra={"host": host, "port": port},
             )
-            self._app.run(transport="http", host=host, port=port)
+            if self._http_middleware:
+                # Serve the http app with extra ASGI middleware (the OAuth
+                # owner gate). FastMCP's own run() does not take ASGI
+                # middleware, so build the app and serve it via uvicorn.
+                import uvicorn
+
+                http_app = self._app.http_app(middleware=self._http_middleware)
+                uvicorn.run(http_app, host=host, port=port)
+            else:
+                self._app.run(transport="http", host=host, port=port)
         else:
             raise ValueError(
                 f"unsupported transport {transport!r}; expected 'stdio' or 'http'"
