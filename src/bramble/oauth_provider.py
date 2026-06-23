@@ -52,7 +52,7 @@ from mcp.server.auth.provider import (
 )
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
-from bramble.oauth_config import OAuthConfig
+from bramble.oauth_config import OAuthConfig, validate_redirect_uri
 from bramble.oauth_store import OAuthStore
 from bramble.static_token_verifier import STATIC_CLIENT_PREFIX
 
@@ -131,6 +131,11 @@ class BrambleOAuthProvider(OAuthProvider):
             raise ValueError(
                 f"client_id must not use the reserved {STATIC_CLIENT_PREFIX!r} prefix"
             )
+        # DCR redirect_uris come from the unauthenticated /register request.
+        # Apply the same https/loopback policy as the static client, so a code
+        # is never sent to a cleartext or custom-scheme callback.
+        for uri in client_info.redirect_uris or []:
+            validate_redirect_uri(str(uri))
         await asyncio.to_thread(self._store.save_client, client_info)
         logger.info("registered oauth client %s", client_info.client_id)
 

@@ -139,6 +139,25 @@ class TestRegistration:
         with pytest.raises(ValueError, match="reserved"):
             await provider.register_client(client)
 
+    async def test_cleartext_redirect_uri_rejected(self, tmp_path: Path) -> None:
+        provider, _, _ = _make_provider(tmp_path)
+        client = OAuthClientInformationFull(
+            client_id="dcr-1", redirect_uris=["http://evil.test/cb"]
+        )
+        with pytest.raises(ValueError, match="https"):
+            await provider.register_client(client)
+
+    async def test_https_and_loopback_redirects_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        provider, _, _ = _make_provider(tmp_path)
+        client = OAuthClientInformationFull(
+            client_id="dcr-2",
+            redirect_uris=["https://claude.ai/cb", "http://localhost:1234/cb"],
+        )
+        await provider.register_client(client)  # must not raise
+        assert await provider.get_client("dcr-2") is not None
+
 
 # ---------------------------------------------------------------------------
 # Authorize

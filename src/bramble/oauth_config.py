@@ -277,7 +277,7 @@ class OAuthConfig:
         if not isinstance(self.static_client_redirect_uris, tuple):
             raise TypeError("static_client_redirect_uris must be a tuple")
         for uri in self.static_client_redirect_uris:
-            self._validate_redirect_uri(uri)
+            validate_redirect_uri(uri)
 
     def _validate_owner_gate(self) -> None:
         if not isinstance(self.owner_secret_file, Path):
@@ -299,21 +299,6 @@ class OAuthConfig:
         if self.owner_session_absolute_seconds < self.owner_session_idle_seconds:
             raise ValueError(
                 "owner_session_absolute_seconds must be >= owner_session_idle_seconds"
-            )
-
-    @staticmethod
-    def _validate_redirect_uri(uri: str) -> None:
-        if not isinstance(uri, str) or not uri.strip():
-            raise ValueError("each redirect URI must be a non-empty string")
-        parsed = urlparse(uri)
-        if parsed.scheme not in ("http", "https"):
-            raise ValueError(
-                f"redirect URI {uri!r} must be an http(s) URL"
-            )
-        host = parsed.hostname or ""
-        if parsed.scheme == "http" and host not in _LOCAL_HOSTS:
-            raise ValueError(
-                f"redirect URI {uri!r} must use https for non-local hosts"
             )
 
     # ------------------------------------------------------------------
@@ -431,6 +416,24 @@ class OAuthConfig:
 # ---------------------------------------------------------------------------
 # Env parsing helpers
 # ---------------------------------------------------------------------------
+def validate_redirect_uri(uri: str) -> None:
+    """Enforce the redirect-URI policy: https, or http only for local hosts.
+
+    Shared by the static-client config and by Dynamic Client Registration so
+    both reject cleartext/custom-scheme callbacks (OAuth 2.1). Raises
+    ``ValueError`` on a violation.
+    """
+
+    if not isinstance(uri, str) or not uri.strip():
+        raise ValueError("each redirect URI must be a non-empty string")
+    parsed = urlparse(uri)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"redirect URI {uri!r} must be an http(s) URL")
+    host = parsed.hostname or ""
+    if parsed.scheme == "http" and host not in _LOCAL_HOSTS:
+        raise ValueError(f"redirect URI {uri!r} must use https for non-local hosts")
+
+
 def _parse_list(value: str | None) -> list[str]:
     """Split a comma- or whitespace-separated env value into items."""
 

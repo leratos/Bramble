@@ -73,13 +73,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="client id to use (default: a generated 'static-<hex>').",
     )
     parser.add_argument(
-        "--scope",
-        dest="scopes",
-        action="append",
-        default=None,
-        help="granted scope (repeat; default: journal:read).",
-    )
-    parser.add_argument(
         "--public-base-url",
         default=None,
         help=(
@@ -149,14 +142,14 @@ def main(argv: list[str] | None = None) -> int:
     client_id = args.client_id or f"static-{secrets.token_hex(8)}"
     client_secret = secrets.token_urlsafe(32)
     redirect_uris = tuple(args.redirect_uris)
-    scopes = tuple(args.scopes) if args.scopes else ("journal:read",)
 
     # Validate the whole static-client configuration via OAuthConfig so the
-    # script rejects exactly what the server would reject at startup.
+    # script rejects exactly what the server would reject at startup. The
+    # client's granted scopes come from BRAMBLE_OAUTH_SCOPES at runtime, not
+    # from this file, so this helper does not take a scope flag.
     try:
         OAuthConfig(
             public_base_url=public_base_url,
-            scopes=scopes,
             static_client_id=client_id,
             static_client_secret=client_secret,
             static_client_redirect_uris=redirect_uris,
