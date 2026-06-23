@@ -9,7 +9,9 @@ import pytest
 from mcp.server.auth.provider import (
     AccessToken,
     AuthorizationParams,
+    AuthorizeError,
     RefreshToken,
+    RegistrationError,
     TokenError,
 )
 from mcp.shared.auth import OAuthClientInformationFull
@@ -120,8 +122,9 @@ class TestRegistration:
             redirect_uris=[_REDIRECT],
             scope="journal:read journal:admin",
         )
-        with pytest.raises(ValueError, match="not valid"):
+        with pytest.raises(RegistrationError) as exc:
             await provider.register_client(client)
+        assert exc.value.error == "invalid_client_metadata"
 
     async def test_missing_client_id_rejected(self, tmp_path: Path) -> None:
         provider, _, _ = _make_provider(tmp_path)
@@ -136,16 +139,18 @@ class TestRegistration:
         client = OAuthClientInformationFull(
             client_id="static:bramble", redirect_uris=[_REDIRECT]
         )
-        with pytest.raises(ValueError, match="reserved"):
+        with pytest.raises(RegistrationError) as exc:
             await provider.register_client(client)
+        assert exc.value.error == "invalid_client_metadata"
 
     async def test_cleartext_redirect_uri_rejected(self, tmp_path: Path) -> None:
         provider, _, _ = _make_provider(tmp_path)
         client = OAuthClientInformationFull(
             client_id="dcr-1", redirect_uris=["http://evil.test/cb"]
         )
-        with pytest.raises(ValueError, match="https"):
+        with pytest.raises(RegistrationError) as exc:
             await provider.register_client(client)
+        assert exc.value.error == "invalid_redirect_uri"
 
     async def test_https_and_loopback_redirects_accepted(
         self, tmp_path: Path
@@ -230,6 +235,36 @@ class TestAuthorize:
         assert stored is not None
         assert stored.scopes == ["journal:read"]
 
+    async def test_authorize_rejects_mismatched_resource(
+        self, tmp_path: Path
+    ) -> None:
+        # RFC 8707: this AS must not mint a code for a different resource.
+        provider, _, _ = _make_provider(tmp_path)
+        client = _client()
+        await provider.register_client(client)
+        params = AuthorizationParams(
+            state="s",
+            scopes=["journal:read"],
+            code_challenge="c",
+            redirect_uri=_REDIRECT,
+            redirect_uri_provided_explicitly=True,
+            resource="https://evil.example/mcp",
+        )
+        with pytest.raises(AuthorizeError):
+            await provider.authorize(client, params)
+
+    async def test_authorize_binds_own_resource_into_code(
+        self, tmp_path: Path
+    ) -> None:
+        provider, store, _ = _make_provider(tmp_path)
+        client = _client()
+        await provider.register_client(client)
+        redirect = await provider.authorize(client, _params())
+        code = parse_qs(urlparse(redirect).query)["code"][0]
+        stored = store.get_auth_code(code)
+        assert stored is not None
+        assert stored.resource == f"{_BASE}/mcp"
+
 
 # ---------------------------------------------------------------------------
 # Full authorization-code flow
@@ -253,6 +288,7 @@ class TestAuthCodeExchange:
         assert access is not None
         assert access.client_id == "client-1"
         assert access.scopes == ["journal:read"]
+        assert access.resource == f"{_BASE}/mcp"  # RFC 8707 audience binding
 
     async def test_code_is_single_use(self, tmp_path: Path) -> None:
         provider, _, _ = _make_provider(tmp_path)

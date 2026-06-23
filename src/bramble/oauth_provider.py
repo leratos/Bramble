@@ -47,6 +47,7 @@ from mcp.server.auth.provider import (
     AuthorizationParams,
     AuthorizeError,
     RefreshToken,
+    RegistrationError,
     TokenError,
     construct_redirect_uri,
 )
@@ -118,8 +119,13 @@ class BrambleOAuthProvider(OAuthProvider):
             valid = set(self.client_registration_options.valid_scopes)
             invalid = requested - valid
             if invalid:
-                raise ValueError(
-                    f"Requested scopes are not valid: {', '.join(sorted(invalid))}"
+                # RegistrationError (not ValueError) so the SDK's
+                # RegistrationHandler returns an OAuth 400, not a 500.
+                raise RegistrationError(
+                    error="invalid_client_metadata",
+                    error_description=(
+                        f"Requested scopes are not valid: {', '.join(sorted(invalid))}"
+                    ),
                 )
         if client_info.client_id is None:
             raise ValueError("client_id is required for client registration")
@@ -128,14 +134,24 @@ class BrambleOAuthProvider(OAuthProvider):
         # bearer path). DCR ids are server-generated, so this only ever guards
         # against a misconfigured / hostile id.
         if client_info.client_id.startswith(STATIC_CLIENT_PREFIX):
-            raise ValueError(
-                f"client_id must not use the reserved {STATIC_CLIENT_PREFIX!r} prefix"
+            raise RegistrationError(
+                error="invalid_client_metadata",
+                error_description=(
+                    f"client_id must not use the reserved "
+                    f"{STATIC_CLIENT_PREFIX!r} prefix"
+                ),
             )
         # DCR redirect_uris come from the unauthenticated /register request.
         # Apply the same https/loopback policy as the static client, so a code
-        # is never sent to a cleartext or custom-scheme callback.
+        # is never sent to a cleartext or custom-scheme callback. Translate the
+        # ValueError into a RegistrationError -> proper OAuth 400.
         for uri in client_info.redirect_uris or []:
-            validate_redirect_uri(str(uri))
+            try:
+                validate_redirect_uri(str(uri))
+            except ValueError as exc:
+                raise RegistrationError(
+                    error="invalid_redirect_uri", error_description=str(exc)
+                ) from exc
         await asyncio.to_thread(self._store.save_client, client_info)
         logger.info("registered oauth client %s", client_info.client_id)
 
@@ -156,6 +172,20 @@ class BrambleOAuthProvider(OAuthProvider):
         if client.client_id is None:
             raise AuthorizeError(
                 error="invalid_client", error_description="Client ID is required"
+            )
+
+        # Bind the authorization to this server's resource (RFC 8707). Reject a
+        # request that targets a different resource, so this AS cannot be used
+        # as a token factory for another MCP server (confused-deputy): a token
+        # issued here is always for Bramble's own /mcp.
+        resource = self._config.resource_url
+        if (
+            params.resource is not None
+            and str(params.resource).rstrip("/") != resource.rstrip("/")
+        ):
+            raise AuthorizeError(
+                error="invalid_request",
+                error_description="resource does not match this server",
             )
 
         # Narrow requested scopes to those the client is registered for. When
@@ -182,6 +212,7 @@ class BrambleOAuthProvider(OAuthProvider):
             scopes=scopes_list,
             expires_at=self._now() + self._config.auth_code_ttl,
             code_challenge=params.code_challenge,
+            resource=resource,
         )
         await asyncio.to_thread(self._store.save_auth_code, auth_code)
         return construct_redirect_uri(
@@ -321,6 +352,7 @@ class BrambleOAuthProvider(OAuthProvider):
                 client_id=client_id,
                 scopes=scopes,
                 expires_at=access_expires,
+                resource=self._config.resource_url,
             ),
         )
         await asyncio.to_thread(
